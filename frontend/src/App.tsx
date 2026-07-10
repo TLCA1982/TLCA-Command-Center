@@ -1,5 +1,8 @@
+import Dashboard from './pages/Dashboard'
+import './styles.css'
+
 const App = () => {
-  return <div>TLCA Command Center</div>
+  return <Dashboard />
 }
 
 export default App

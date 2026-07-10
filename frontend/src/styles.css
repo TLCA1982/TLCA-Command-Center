@@ -1,0 +1,250 @@
+:root {
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #0f172a;
+  background-color: #f4f7fb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef4fb 100%);
+}
+
+button {
+  font: inherit;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.topbar {
+  background: linear-gradient(90deg, #071b3d 0%, #12366d 100%);
+  color: #fff;
+  padding: 1.25rem 2rem;
+  box-shadow: 0 8px 24px rgba(7, 27, 61, 0.18);
+}
+
+.topbar__eyebrow {
+  margin: 0 0 0.25rem;
+  color: #cbd5e1;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 1.45rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.content {
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 1rem 1.1rem;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  text-align: left;
+}
+
+.stat-card:hover,
+.stat-card--active {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 35px rgba(15, 23, 42, 0.1);
+  border-color: color-mix(in srgb, var(--accent) 45%, #e2e8f0);
+}
+
+.stat-card__icon {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 12%, white);
+  color: var(--accent);
+  font-size: 1.25rem;
+}
+
+.stat-card__title {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.stat-card__value {
+  margin: 0.2rem 0 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.table-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  padding: 1rem 1.1rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+}
+
+.table-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.table-card__header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #0f172a;
+}
+
+.table-card__subtitle {
+  margin: 0.1rem 0 0;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.table-card__header span {
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 0.5rem 0.55rem;
+  text-align: left;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.92rem;
+  line-height: 1.25;
+}
+
+th {
+  color: #64748b;
+  font-weight: 600;
+}
+
+tbody tr:hover {
+  background: #f8fbff;
+}
+
+.customer-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.customer-cell__name {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.customer-cell__contact {
+  color: #64748b;
+  font-size: 0.82rem;
+}
+
+.priority,
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.priority--hoog {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.priority--gemiddeld {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.priority--laag {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.status-pill--open {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.status-pill--wacht-op-klant {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.status-pill--wacht-op-leverancier {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+.status-pill--afgewerkt {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+@media (max-width: 900px) {
+  .card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .content {
+    padding: 1rem;
+  }
+
+  .topbar {
+    padding: 1rem 1rem 1.1rem;
+  }
+
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+}

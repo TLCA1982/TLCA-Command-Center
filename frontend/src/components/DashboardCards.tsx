@@ -25,7 +25,7 @@ const DashboardCards = ({ cards, activeFilter, onSelectFilter }: DashboardCardsP
           icon={card.icon}
           accent={card.accent}
           isActive={activeFilter === card.filter}
-          onClick={() => onSelectFilter(card.filter)}
+          onClick={() => onSelectFilter(activeFilter === card.filter ? 'all' : card.filter)}
         />
       ))}
     </section>

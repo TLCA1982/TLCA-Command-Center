@@ -7,7 +7,16 @@ type ActionTableProps = {
 }
 
 const ActionTable = ({ actions, activeFilter }: ActionTableProps) => {
-  const subtitle = activeFilter === 'all' ? 'Alle acties' : activeFilter === 'today' ? 'Vandaag' : activeFilter === 'waiting' ? 'In behandeling' : activeFilter === 'offers' ? 'Offertes' : 'Dossiers'
+  const subtitle =
+    activeFilter === 'all'
+      ? 'Alle acties'
+      : activeFilter === 'today'
+        ? 'Vandaag'
+        : activeFilter === 'waiting'
+          ? 'Wachtend'
+          : activeFilter === 'offers'
+            ? 'Open offertes'
+            : 'Dossiers'
 
   return (
     <div className="table-card">
@@ -16,7 +25,7 @@ const ActionTable = ({ actions, activeFilter }: ActionTableProps) => {
           <h2>Acties</h2>
           <p className="table-card__subtitle">{subtitle}</p>
         </div>
-        <span>Vandaag</span>
+        <span>{subtitle}</span>
       </div>
       <div className="table-wrapper">
         <table>

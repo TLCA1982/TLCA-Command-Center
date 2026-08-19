@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { belgianToIso, isBelgianDate, isValidBelgianDate } from '../utils/date'
+import { apiUrl } from '../api'
 
 type Props = {
   onClose: () => void
@@ -42,7 +43,7 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
     }
 
     try {
-      const resp = await fetch('http://localhost:8000/dossiers', {
+      const resp = await fetch(apiUrl('/dossiers'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(payload),

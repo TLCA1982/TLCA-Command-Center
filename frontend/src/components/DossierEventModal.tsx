@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { belgianToIso, isoToBelgian, isBelgianDate, isValidBelgianDate } from '../utils/date'
+import { apiUrl } from '../api'
 
 type Props = {
   dossierId: string
@@ -78,13 +79,13 @@ const DossierEventModal = ({ dossierId, currentStatus = 'Lopend', onClose, onSav
     try {
       let resp: Response
       if (editing) {
-        resp = await fetch(`http://localhost:8000/dossiers/${dossierId}/events/${initialEvent.id}`, {
+        resp = await fetch(apiUrl(`/dossiers/${dossierId}/events/${initialEvent.id}`), {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(payload),
         })
       } else {
-        resp = await fetch(`http://localhost:8000/dossiers/${dossierId}/events`, {
+        resp = await fetch(apiUrl(`/dossiers/${dossierId}/events`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(payload),
@@ -114,7 +115,7 @@ const DossierEventModal = ({ dossierId, currentStatus = 'Lopend', onClose, onSav
     setSaving(true)
     setError(null)
     try {
-      const resp = await fetch(`http://localhost:8000/dossiers/${dossierId}/events/${initialEvent.id}`, { method: 'DELETE', headers: { Accept: 'application/json' } })
+      const resp = await fetch(apiUrl(`/dossiers/${dossierId}/events/${initialEvent.id}`), { method: 'DELETE', headers: { Accept: 'application/json' } })
       if (!resp.ok) {
         const txt = await resp.text()
         throw new Error(txt || 'Verwijderen mislukt')

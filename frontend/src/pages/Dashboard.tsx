@@ -5,6 +5,7 @@ import ActionTable from '../components/ActionTable'
 import ManualActionModal from '../components/ManualActionModal'
 import DossierDetail from '../components/DossierDetail'
 import type { Action } from '../types/Action'
+import { apiUrl } from '../api'
 
 type MicrosoftActionResponse = {
   id?: string
@@ -196,7 +197,7 @@ const Dashboard = () => {
       setError(null)
 
       try {
-        const response = await fetch('http://localhost:8000/actions', {
+        const response = await fetch(apiUrl('/actions'), {
           headers: {
             Accept: 'application/json',
           },
@@ -239,7 +240,7 @@ const Dashboard = () => {
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch('http://localhost:8000/actions', { headers: { Accept: 'application/json' } })
+      const response = await fetch(apiUrl('/actions'), { headers: { Accept: 'application/json' } })
       if (!response.ok) throw new Error('Actions could not be loaded.')
       const payload: MicrosoftActionResponse[] = await response.json()
       setActions(payload.map(mapMicrosoftAction))

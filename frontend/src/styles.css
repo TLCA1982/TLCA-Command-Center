@@ -293,6 +293,50 @@ tbody tr:hover {
   .card-grid {
     grid-template-columns: 1fr;
   }
+
+  .table-card__header:has(input) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.6rem;
+    align-items: start;
+  }
+
+  .table-card__header:has(input) > div:first-child,
+  .table-card__header:has(input) > div:first-child > div {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .table-card__header:has(input) > div:first-child > div input {
+    width: 100% !important;
+  }
+
+  .table-card__header:has(input) > div:last-child {
+    display: flex;
+    width: 100%;
+    gap: 0.35rem;
+    justify-content: flex-start;
+  }
+
+  .table-card__header:has(input) > div:last-child > .action-btn,
+  .table-card__header:has(input) > div:last-child [role='group'] {
+    min-width: 0;
+  }
+
+  .table-card__header:has(input) > div:last-child .action-btn {
+    padding: 0 0.45rem;
+    font-size: 0.82rem;
+    white-space: nowrap;
+  }
+
+  .table-card__header:has(input) > div:last-child [role='group'] {
+    display: flex;
+    gap: 0.35rem;
+  }
+
+  .table-card__header:has(input) > div:last-child [role='group'] .action-btn[style] {
+    margin-right: 0 !important;
+  }
 }
 
 /* Modal styles for manual action creation */
@@ -301,6 +345,8 @@ tbody tr:hover {
   inset: 0;
   display: grid;
   place-items: center;
+  padding: 1rem;
+  overflow-y: auto;
   background: rgba(2,6,23,0.45);
   z-index: 1000;
 }
@@ -308,6 +354,10 @@ tbody tr:hover {
 .modal-card {
   width: 520px;
   max-width: calc(100% - 32px);
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: #fff;
   border-radius: 12px;
   padding: 1rem;
@@ -315,6 +365,15 @@ tbody tr:hover {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
+}
+
+.modal-card > h3 {
+  position: sticky;
+  top: -1rem;
+  z-index: 1;
+  margin-top: -1rem;
+  padding-top: 1rem;
+  background: #fff;
 }
 
 .modal-card label {

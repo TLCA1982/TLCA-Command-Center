@@ -7,3 +7,4 @@ __pycache__/
 *.pyc
 *.msal_token_cache.bin
 *msal*token*cache*
+database/actions.db

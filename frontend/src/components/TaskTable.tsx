@@ -17,14 +17,14 @@ type TaskTableProps = {
 const createClassName = (value: string) => value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
 
 const TaskTable = ({ tasks, activeFilter }: TaskTableProps) => {
-  const subtitle = activeFilter === 'all' ? 'Alle acties' : activeFilter === 'today' ? 'Vandaag' : activeFilter === 'waiting' ? 'In behandeling' : activeFilter === 'offers' ? 'Offertes' : 'Dossiers'
+  // keep activeFilter referenced to avoid unused variable TypeScript error after subtitle removal
+  void activeFilter
 
   return (
     <div className="table-card">
       <div className="table-card__header">
         <div>
           <h2>Acties</h2>
-          <p className="table-card__subtitle">{subtitle}</p>
         </div>
         <span>Vandaag</span>
       </div>

@@ -33,6 +33,9 @@ button {
   color: #fff;
   padding: 1.25rem 2rem;
   box-shadow: 0 8px 24px rgba(7, 27, 61, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .topbar__eyebrow {
@@ -48,6 +51,33 @@ button {
   font-size: 1.45rem;
   font-weight: 700;
   letter-spacing: 0.02em;
+}
+
+.topbar__nav {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.topbar__navitem {
+  background: transparent;
+  color: rgba(255,255,255,0.85);
+  border: none;
+  padding: 0.45rem 0.8rem;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.topbar__navitem:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.topbar__navitem--active {
+  background: rgba(255,255,255,0.12);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(2,6,23,0.25);
 }
 
 .content {
@@ -235,6 +265,22 @@ tbody tr:hover {
   }
 }
 
+/* Desktop column distribution for Dossiers overview: adjust Klant, Contactpersoon, Onderwerp */
+@media (min-width: 900px) {
+  /* keep overall card/table width unchanged; only hint column sizes */
+  .table-wrapper table th:nth-child(1), .table-wrapper table td:nth-child(1) { width: 8%; }
+  .table-wrapper table th:nth-child(2), .table-wrapper table td:nth-child(2) { width: 22%; white-space: nowrap; }
+  .table-wrapper table th:nth-child(3), .table-wrapper table td:nth-child(3) { width: 16%; }
+  .table-wrapper table th:nth-child(4), .table-wrapper table td:nth-child(4) { width: 30%; }
+  .table-wrapper table th:nth-child(5), .table-wrapper table td:nth-child(5) { width: 8%; }
+  .table-wrapper table th:nth-child(6), .table-wrapper table td:nth-child(6) { width: 6%; }
+  .table-wrapper table th:nth-child(7), .table-wrapper table td:nth-child(7) { width: 7%; }
+  .table-wrapper table th:nth-child(8), .table-wrapper table td:nth-child(8) { width: 3%; }
+
+  /* prevent Klant and headers for activity/contact from breaking */
+  .table-wrapper table th:nth-child(1), .table-wrapper table th:nth-child(5), .table-wrapper table th:nth-child(2) { white-space: nowrap; }
+}
+
 @media (max-width: 600px) {
   .content {
     padding: 1rem;
@@ -248,3 +294,71 @@ tbody tr:hover {
     grid-template-columns: 1fr;
   }
 }
+
+/* Modal styles for manual action creation */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(2,6,23,0.45);
+  z-index: 1000;
+}
+
+.modal-card {
+  width: 520px;
+  max-width: calc(100% - 32px);
+  background: #fff;
+  border-radius: 12px;
+  padding: 1rem;
+  box-shadow: 0 20px 60px rgba(2,6,23,0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.modal-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.modal-card input,
+.modal-card textarea,
+.modal-card select {
+  padding: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.modal-card textarea { min-height: 80px }
+
+/* Action header buttons */
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-weight: 600;
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+.action-btn--primary {
+  background: #2563eb;
+  color: #fff;
+  border-color: transparent;
+}
+.action-btn--secondary {
+  background: transparent;
+  color: #0f172a;
+  border-color: #e2e8f0;
+}
+.action-btn--active {
+  background: #e6f0ff;
+  border-color: #bfe0ff;
+}
+

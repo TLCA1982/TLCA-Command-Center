@@ -1,4 +1,5 @@
 export interface Action {
+  id?: string
   priority: string
   title: string
   customer: string
@@ -7,4 +8,9 @@ export interface Action {
   dueDate: string
   status: string
   group: string
+  notes?: string
+  actionType?: string
+  webLink?: string
+  microsoftList?: string
+  lastModifiedDate?: string
 }

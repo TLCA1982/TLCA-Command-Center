@@ -2,7 +2,7 @@ export const summaryCards = [
   { title: 'Vandaag', value: '4', icon: '📅', accent: '#2563eb', filter: 'today' },
   { title: 'Wachtend', value: '3', icon: '⏳', accent: '#f59e0b', filter: 'waiting' },
   { title: 'Open offertes', value: '2', icon: '📄', accent: '#10b981', filter: 'offers' },
-  { title: 'Dossiers', value: '1', icon: '⚠️', accent: '#ef4444', filter: 'urgent' },
+  { title: 'Opvolgen', value: '1', icon: '⚠️', accent: '#ef4444', filter: 'urgent' },
 ]
 
 export const tasks = [

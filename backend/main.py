@@ -1,8 +1,3 @@
-from fastapi import FastAPI
+from app.main import app
 
-app = FastAPI(title="TLCA Command Center")
-
-
-@app.get("/")
-def read_root() -> dict[str, str]:
-    return {"message": "Hello API"}
+__all__ = ["app"]

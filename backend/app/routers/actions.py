@@ -424,6 +424,7 @@ async def update_microsoft_action(action_id: str, payload: dict[str, Any]) -> di
                                 flush=True,
                             )
                         patch_resp.raise_for_status()
+                        updated_task = {**task, **patch_resp.json()}
 
                         if is_flagged and payload.get("dueDate") and mapped == "waitingOnOthers":
                             status_patch_resp = await http_client.patch(
@@ -438,6 +439,7 @@ async def update_microsoft_action(action_id: str, payload: dict[str, Any]) -> di
                                     flush=True,
                                 )
                             status_patch_resp.raise_for_status()
+                            updated_task.update(status_patch_resp.json())
 
                         # after successful Graph update, persist local metadata if provided in payload
                         try:
@@ -448,6 +450,14 @@ async def update_microsoft_action(action_id: str, payload: dict[str, Any]) -> di
                         except Exception:
                             # don't fail the whole request if local metadata save fails; best-effort
                             pass
+
+                        canonical = _normalize_task(updated_task, source_for_meta, list_item.get("displayName") or list_item.get("wellknownListName") or "Microsoft To Do")
+                        if is_flagged:
+                            canonical.update(await _get_flagged_email_sender(http_client, headers, updated_task))
+                        metadata = microsoft_metadata.get(action_id) or {}
+                        canonical["customer"] = metadata.get("customer", "")
+                        canonical["contact"] = metadata.get("contact", "")
+                        canonical["actionType"] = metadata.get("action_type", "")
 
                         found = True
                         break
@@ -462,7 +472,7 @@ async def update_microsoft_action(action_id: str, payload: dict[str, Any]) -> di
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return {"updated": True}
+    return canonical
 
 
 @router.delete("/microsoft/{action_id}")

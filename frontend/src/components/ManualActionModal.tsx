@@ -5,7 +5,7 @@ import { apiUrl } from '../api'
 
 type Props = {
   onClose: () => void
-  onSaved: () => void
+  onSaved: (action?: Action) => void
   initial?: Action
 }
 
@@ -85,6 +85,7 @@ const ManualActionModal = ({ onClose, onSaved, initial }: Props) => {
           const txt = await resp.text()
           throw new Error(txt || 'Failed to update Microsoft action')
         }
+        onSaved(await resp.json())
       } else {
         const url = isEdit ? apiUrl(`/actions/manual/${initial?.id}`) : apiUrl('/actions/manual')
         const method = isEdit ? 'PUT' : 'POST'
@@ -97,9 +98,9 @@ const ManualActionModal = ({ onClose, onSaved, initial }: Props) => {
           const txt = await resp.text()
           throw new Error(txt || 'Failed to save')
         }
+        onSaved(await resp.json())
       }
 
-      onSaved()
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Opslaan mislukt')

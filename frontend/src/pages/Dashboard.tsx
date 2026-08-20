@@ -318,7 +318,7 @@ const Dashboard = () => {
       successfulIds.forEach((id) => next.delete(id))
       return next
     })
-    await reloadActions()
+    setActions((current) => current.filter((action) => !successfulIds.includes(action.id as string)))
     if (failedTitles.length > 0) {
       setError(`Verwijderen mislukt voor: ${failedTitles.join(', ')}`)
     }
@@ -427,10 +427,24 @@ const Dashboard = () => {
               setShowCreateModal(false)
               setEditingAction(null)
             }}
-            onSaved={() => {
+            onSaved={(savedAction) => {
               setShowCreateModal(false)
               setEditingAction(null)
-              reloadActions()
+              if (!savedAction) {
+                if (editingAction?.id) {
+                  setActions((current) => current.filter((action) => action.id !== editingAction.id))
+                }
+                return
+              }
+
+              const mappedAction = mapMicrosoftAction(savedAction)
+              setActions((current) => {
+                const index = current.findIndex((action) => action.id === mappedAction.id)
+                if (index === -1) return [...current, mappedAction]
+                const next = [...current]
+                next[index] = mappedAction
+                return next
+              })
             }}
           />
         )}

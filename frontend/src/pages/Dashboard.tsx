@@ -21,6 +21,8 @@ type MicrosoftActionResponse = {
   notes?: string
   webLink?: string
   microsoftList?: string
+  senderName?: string
+  senderEmail?: string
 }
 
 type SummaryCard = {
@@ -30,6 +32,9 @@ type SummaryCard = {
   accent: string
   filter: string
 }
+
+type SortKey = 'priority' | 'title' | 'customer' | 'source' | 'dueDate' | 'status'
+type SortDirection = 'asc' | 'desc'
 
 const summaryCardDefinitions: SummaryCard[] = [
   { title: 'Vandaag', value: '0', icon: '📅', accent: '#2563eb', filter: 'today' },
@@ -109,6 +114,8 @@ const deriveActionGroup = (action: Action) => {
       webLink: item.webLink ?? '',
       microsoftList: item.microsoftList ?? '',
       lastModifiedDate: item.lastModifiedDate ?? '',
+      senderName: item.senderName ?? '',
+      senderEmail: item.senderEmail ?? '',
     }
 
   action.group = deriveActionGroup(action)
@@ -188,6 +195,9 @@ const Dashboard = () => {
   const [editingAction, setEditingAction] = useState<Action | null>(null)
   const [openDossierId, setOpenDossierId] = useState<string | null>(null)
   const [searchCustomer, setSearchCustomer] = useState('')
+  const [selectedActionIds, setSelectedActionIds] = useState<Set<string>>(new Set())
+  const [sortKey, setSortKey] = useState<SortKey>('dueDate')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
 
   useEffect(() => {
     let isMounted = true
@@ -252,6 +262,68 @@ const Dashboard = () => {
     }
   }
 
+  const isDeletableAction = (action: Action) =>
+    !!action.id && (action.source === 'Command Center' || action.source === 'Microsoft To Do' || action.source === 'Outlook gemarkeerde mail')
+
+  const toggleSelectedAction = (action: Action) => {
+    if (!isDeletableAction(action) || !action.id) return
+    setSelectedActionIds((current) => {
+      const next = new Set(current)
+      if (next.has(action.id as string)) next.delete(action.id as string)
+      else next.add(action.id as string)
+      return next
+    })
+  }
+
+  const toggleVisibleActions = (checked: boolean) => {
+    setSelectedActionIds((current) => {
+      const next = new Set(current)
+      visibleActions.filter(isDeletableAction).forEach((action) => {
+        if (!action.id) return
+        if (checked) next.add(action.id)
+        else next.delete(action.id)
+      })
+      return next
+    })
+  }
+
+  const deleteSelectedActions = async () => {
+    const selectedActions = actions.filter((action) => !!action.id && selectedActionIds.has(action.id) && isDeletableAction(action))
+    if (selectedActions.length === 0) return
+
+    const ok = window.confirm(`Weet je zeker dat je ${selectedActions.length} geselecteerde actie(s) wilt verwijderen?`)
+    if (!ok) return
+
+    const results = await Promise.allSettled(
+      selectedActions.map(async (action) => {
+        const endpoint = action.source === 'Command Center' ? `/actions/manual/${action.id}` : `/actions/microsoft/${action.id}`
+        const response = await fetch(apiUrl(endpoint), { method: 'DELETE', headers: { Accept: 'application/json' } })
+        if (!response.ok) {
+          const text = await response.text()
+          throw new Error(text || `Verwijderen van ${action.title} mislukt`)
+        }
+        return action.id as string
+      }),
+    )
+
+    const successfulIds = selectedActions
+      .filter((_action, index) => results[index].status === 'fulfilled')
+      .map((action) => action.id as string)
+    const failedTitles = selectedActions
+      .filter((_action, index) => results[index].status === 'rejected')
+      .map((action) => action.title)
+
+    setSelectedActionIds((current) => {
+      const next = new Set(current)
+      successfulIds.forEach((id) => next.delete(id))
+      return next
+    })
+    await reloadActions()
+    if (failedTitles.length > 0) {
+      setError(`Verwijderen mislukt voor: ${failedTitles.join(', ')}`)
+    }
+  }
+
   const summaryCards = useMemo(
     () =>
       summaryCardDefinitions.map((card) => ({
@@ -266,9 +338,42 @@ const Dashboard = () => {
     const list = activeFilter === 'all' ? actions : actions.filter((action) => matchesFilter(action, activeFilter))
     const filtered = showCompleted ? list.filter((a) => a.status === 'Afgewerkt') : list.filter((a) => a.status !== 'Afgewerkt')
     const q = searchCustomer.trim().toLowerCase()
-    if (!q) return filtered
-    return filtered.filter((a) => (a.customer ?? '').toLowerCase().includes(q))
-  }, [actions, activeFilter, showCompleted, searchCustomer])
+    const searched = q ? filtered.filter((a) => (a.customer ?? '').toLowerCase().includes(q)) : filtered
+
+    const sorted = [...searched]
+    sorted.sort((left, right) => {
+      if (sortKey === 'dueDate') {
+        const leftDueDate = left.dueDate ?? ''
+        const rightDueDate = right.dueDate ?? ''
+        if (!leftDueDate && rightDueDate) return 1
+        if (leftDueDate && !rightDueDate) return -1
+        if (!leftDueDate && !rightDueDate) return 0
+        const comparison = leftDueDate.localeCompare(rightDueDate)
+        return sortDirection === 'asc' ? comparison : -comparison
+      }
+
+      const values: Record<Exclude<SortKey, 'dueDate'>, (action: Action) => string> = {
+        priority: (action) => action.priority,
+        title: (action) => action.title,
+        customer: (action) => action.customer,
+        source: (action) => action.source,
+        status: (action) => action.status,
+      }
+      const comparison = values[sortKey](left).localeCompare(values[sortKey](right), undefined, { sensitivity: 'base' })
+      return sortDirection === 'asc' ? comparison : -comparison
+    })
+
+    return sorted
+  }, [actions, activeFilter, showCompleted, searchCustomer, sortKey, sortDirection])
+
+  const handleSortChange = (nextSortKey: SortKey) => {
+    if (nextSortKey === sortKey) {
+      setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortKey(nextSortKey)
+    setSortDirection('asc')
+  }
 
   return (
     <div className="app-shell">
@@ -289,6 +394,13 @@ const Dashboard = () => {
           searchValue={searchCustomer}
           onSearchChange={(v) => setSearchCustomer(v)}
           onToggleCompleted={(value) => setShowCompleted(value)}
+          selectedActionIds={selectedActionIds}
+          onToggleSelected={toggleSelectedAction}
+          onToggleSelectAll={toggleVisibleActions}
+          onDeleteSelected={deleteSelectedActions}
+          sortKey={sortKey}
+          sortDirection={sortDirection}
+          onSortChange={handleSortChange}
           onCreate={() => {
             setEditingAction(null)
             setShowCreateModal(true)

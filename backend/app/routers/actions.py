@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -68,7 +69,7 @@ def _normalize_task(task: dict[str, Any], source: str, microsoft_list: str) -> d
         "source": source,
         "status": _map_status(task.get("status")),
         "priority": _map_importance(task.get("importance")),
-        "dueDate": _normalize_date(task.get("dueDate")),
+        "dueDate": _normalize_date(task.get("dueDateTime")),
         "createdDate": _normalize_date(task.get("createdDateTime")),
         "lastModifiedDate": _normalize_date(task.get("lastModifiedDateTime")),
         "customer": "",
@@ -77,6 +78,39 @@ def _normalize_task(task: dict[str, Any], source: str, microsoft_list: str) -> d
         "webLink": web_link or "",
         "microsoftList": microsoft_list,
     }
+
+
+async def _get_flagged_email_sender(http_client: httpx.AsyncClient, headers: dict[str, str], task: dict[str, Any]) -> dict[str, str]:
+    linked_resources = task.get("linkedResources") or []
+    if not isinstance(linked_resources, list):
+        return {"senderName": "", "senderEmail": ""}
+
+    for resource in linked_resources:
+        if not isinstance(resource, dict):
+            continue
+
+        external_id = resource.get("externalId")
+        application_name = str(resource.get("applicationName") or "").lower()
+        if not external_id or ("outlook" not in application_name and "mail" not in application_name):
+            continue
+
+        try:
+            message_response = await http_client.get(
+                f"https://graph.microsoft.com/v1.0/me/messages/{quote(str(external_id), safe='')}",
+                params={"$select": "from"},
+                headers=headers,
+            )
+            message_response.raise_for_status()
+            sender = message_response.json().get("from") or {}
+            sender_address = sender.get("emailAddress") or {}
+            return {
+                "senderName": str(sender_address.get("name") or ""),
+                "senderEmail": str(sender_address.get("address") or ""),
+            }
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+            return {"senderName": "", "senderEmail": ""}
+
+    return {"senderName": "", "senderEmail": ""}
 
 
 @router.get("/microsoft")
@@ -113,6 +147,9 @@ async def get_microsoft_actions() -> list[dict[str, Any]]:
                     normalized = _normalize_task(task, source, list_name)
                     if not normalized["id"]:
                         continue
+
+                    if is_flagged_list:
+                        normalized.update(await _get_flagged_email_sender(http_client, headers, task))
 
                     # merge local metadata if present
                     meta = microsoft_metadata.get(normalized["id"]) or {}
@@ -353,6 +390,12 @@ async def update_microsoft_action(action_id: str, payload: dict[str, Any]) -> di
 
                         # patch this task
                         patch_resp = await http_client.patch(f"https://graph.microsoft.com/v1.0/me/todo/lists/{list_id}/tasks/{action_id}", headers=headers, json=patch_body)
+                        if patch_resp.is_error:
+                            print(
+                                f"[Microsoft action update] Graph PATCH failed: "
+                                f"status={patch_resp.status_code} body={patch_resp.text}",
+                                flush=True,
+                            )
                         patch_resp.raise_for_status()
 
                         # after successful Graph update, persist local metadata if provided in payload

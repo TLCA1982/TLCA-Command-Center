@@ -1,6 +1,9 @@
 import ActionRow from './ActionRow'
 import type { Action } from '../types/Action'
 
+type SortKey = 'priority' | 'title' | 'customer' | 'source' | 'dueDate' | 'status'
+type SortDirection = 'asc' | 'desc'
+
 type ActionTableProps = {
   actions: Action[]
   activeFilter: string
@@ -13,8 +16,15 @@ type ActionTableProps = {
   noResultsMessage?: string
   searchValue?: string
   onSearchChange?: (s: string) => void
+  selectedActionIds?: Set<string>
+  onToggleSelected?: (action: Action) => void
+  onToggleSelectAll?: (checked: boolean) => void
+  onDeleteSelected?: () => void
+  sortKey?: SortKey
+  sortDirection?: SortDirection
+  onSortChange?: (sortKey: SortKey) => void
 }
-const ActionTable = ({ actions, activeFilter, loading = false, error = null, showCompleted = false, onToggleCompleted, onCreate, onEdit, noResultsMessage, searchValue, onSearchChange }: ActionTableProps) => {
+const ActionTable = ({ actions, activeFilter, loading = false, error = null, showCompleted = false, onToggleCompleted, onCreate, onEdit, noResultsMessage, searchValue, onSearchChange, selectedActionIds = new Set<string>(), onToggleSelected, onToggleSelectAll, onDeleteSelected, sortKey, sortDirection, onSortChange }: ActionTableProps) => {
   // keep activeFilter referenced to avoid unused variable TypeScript error
   void activeFilter
 
@@ -25,6 +35,21 @@ const ActionTable = ({ actions, activeFilter, loading = false, error = null, sho
       : actions.length === 0
         ? (noResultsMessage ?? 'Geen acties gevonden voor deze selectie.')
         : null
+  const selectableActions = actions.filter((action) => !!action.id && (action.source === 'Command Center' || action.source === 'Microsoft To Do' || action.source === 'Outlook gemarkeerde mail'))
+  const allVisibleSelected = selectableActions.length > 0 && selectableActions.every((action) => selectedActionIds.has(action.id as string))
+  const selectedCount = selectedActionIds.size
+
+  const sortableHeader = (key: SortKey, label: string) => (
+    <button
+      type="button"
+      onClick={() => onSortChange?.(key)}
+      style={{ border: 0, background: 'none', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer' }}
+      aria-label={`Sorteer op ${label}`}
+    >
+      {label}
+      {sortKey === key && <span aria-hidden="true" style={{ marginLeft: 4, opacity: 0.65 }}>{sortDirection === 'asc' ? '↑' : '↓'}</span>}
+    </button>
+  )
 
   return (
     <div className="table-card">
@@ -43,6 +68,11 @@ const ActionTable = ({ actions, activeFilter, loading = false, error = null, sho
           )}
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          {selectedCount > 0 && (
+            <button type="button" className="action-btn action-btn--secondary" onClick={() => onDeleteSelected?.()}>
+              Verwijder geselecteerde ({selectedCount})
+            </button>
+          )}
           <button type="button" className="action-btn action-btn--primary" onClick={() => onCreate?.()}>
             + Nieuwe actie
           </button>
@@ -72,17 +102,33 @@ const ActionTable = ({ actions, activeFilter, loading = false, error = null, sho
           <table>
             <thead>
               <tr>
-                <th>Prioriteit</th>
-                <th>Actie</th>
-                <th>Klant</th>
-                <th>Bron</th>
-                <th>Vervaldatum</th>
-                <th>Status</th>
+                <th>
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    disabled={selectableActions.length === 0}
+                    aria-label="Selecteer zichtbare acties"
+                    onChange={(event) => onToggleSelectAll?.(event.target.checked)}
+                  />
+                </th>
+                <th>{sortableHeader('priority', 'Prioriteit')}</th>
+                <th>{sortableHeader('title', 'Actie')}</th>
+                <th>{sortableHeader('customer', 'Klant')}</th>
+                <th>{sortableHeader('source', 'Bron')}</th>
+                <th>{sortableHeader('dueDate', 'Vervaldatum')}</th>
+                <th>{sortableHeader('status', 'Status')}</th>
               </tr>
             </thead>
             <tbody>
               {actions.map((action) => (
-                <ActionRow key={`${action.id ?? action.title}-${action.customer}`} action={action} onClick={onEdit} />
+                <ActionRow
+                  key={`${action.id ?? action.title}-${action.customer}`}
+                  action={action}
+                  onClick={onEdit}
+                  selected={!!action.id && selectedActionIds.has(action.id)}
+                  selectable={!!action.id && (action.source === 'Command Center' || action.source === 'Microsoft To Do' || action.source === 'Outlook gemarkeerde mail')}
+                  onToggleSelected={onToggleSelected}
+                />
               ))}
             </tbody>
           </table>

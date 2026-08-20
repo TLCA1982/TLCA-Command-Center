@@ -13,4 +13,6 @@ export interface Action {
   webLink?: string
   microsoftList?: string
   lastModifiedDate?: string
+  senderName?: string
+  senderEmail?: string
 }

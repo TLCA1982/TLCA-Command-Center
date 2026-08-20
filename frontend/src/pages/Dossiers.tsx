@@ -12,6 +12,40 @@ const Dossiers = () => {
   const [openDossierId, setOpenDossierId] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [search, setSearch] = useState('')
+  const [sortKey, setSortKey] = useState<string | null>(null)
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+
+  const sortFields: Record<string, (dossier: any) => string> = {
+    last_activity: (dossier) => dossier.last_activity ?? dossier.created_at ?? '',
+    customer: (dossier) => dossier.customer ?? '',
+    contact: (dossier) => dossier.contact ?? '',
+    subject: (dossier) => dossier.subject ?? '',
+    last_contact: () => '',
+    status: (dossier) => dossier.status ?? '',
+    follow_up_date: (dossier) => dossier.follow_up_date ?? '',
+    source: (dossier) => dossier.source ?? 'Dossier',
+  }
+
+  const handleSort = (nextSortKey: string) => {
+    if (sortKey === nextSortKey) {
+      setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortKey(nextSortKey)
+    setSortDirection('asc')
+  }
+
+  const sortableHeader = (key: string, label: string) => (
+    <button
+      type="button"
+      onClick={() => handleSort(key)}
+      style={{ border: 0, background: 'none', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer' }}
+      aria-label={`Sorteer op ${label}`}
+    >
+      {label}
+      {sortKey === key && <span aria-hidden="true" style={{ marginLeft: 4, opacity: 0.65 }}>{sortDirection === 'asc' ? '▲' : '▼'}</span>}
+    </button>
+  )
 
   useEffect(() => {
     let mounted = true
@@ -85,34 +119,42 @@ const Dossiers = () => {
             <div className="table-wrapper"><p className="table-card__subtitle" style={{ color: 'red' }}>{error}</p></div>
           ) : (
             <div className="table-wrapper">
-              {items.filter((d) => {
+              {(() => {
+                const filteredItems = items.filter((d) => {
                 const q = search.trim().toLowerCase()
                 if (!q) return true
                 return (d.customer || '').toLowerCase().includes(q)
-              }).length === 0 ? (
+                })
+                const visibleItems = sortKey ? [...filteredItems].sort((left, right) => {
+                  const leftValue = sortFields[sortKey](left)
+                  const rightValue = sortFields[sortKey](right)
+                  if (!leftValue && rightValue) return 1
+                  if (leftValue && !rightValue) return -1
+                  if (!leftValue && !rightValue) return 0
+                  const comparison = sortKey === 'last_activity' || sortKey === 'follow_up_date'
+                    ? leftValue.localeCompare(rightValue)
+                    : leftValue.localeCompare(rightValue, undefined, { sensitivity: 'base' })
+                  return sortDirection === 'asc' ? comparison : -comparison
+                }) : filteredItems
+
+                return visibleItems.length === 0 ? (
                 <p className="table-card__subtitle">Geen dossiers gevonden voor deze klant.</p>
               ) : (
               <table>
                 <thead>
                   <tr>
-                    <th>Laatste activiteit</th>
-                    <th>Klant</th>
-                    <th>Contactpersoon</th>
-                    <th>Onderwerp</th>
-                    <th>Laatste contact</th>
-                    <th>Status</th>
-                    <th>Opvolgdatum</th>
-                    <th>Bron</th>
+                    <th>{sortableHeader('last_activity', 'Laatste activiteit')}</th>
+                    <th>{sortableHeader('customer', 'Klant')}</th>
+                    <th>{sortableHeader('contact', 'Contactpersoon')}</th>
+                    <th>{sortableHeader('subject', 'Onderwerp')}</th>
+                    <th>{sortableHeader('last_contact', 'Laatste contact')}</th>
+                    <th>{sortableHeader('status', 'Status')}</th>
+                    <th>{sortableHeader('follow_up_date', 'Opvolgdatum')}</th>
+                    <th>{sortableHeader('source', 'Bron')}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {items
-                    .filter((d) => {
-                      const q = search.trim().toLowerCase()
-                      if (!q) return true
-                      return (d.customer || '').toLowerCase().includes(q)
-                    })
-                    .map((d) => (
+                  {visibleItems.map((d) => (
                     <tr key={d.id} onClick={() => setOpenDossierId(d.id)} style={{ cursor: 'pointer' }}>
                           <td>{isoToBelgian(d.last_activity ?? d.created_at ?? '')}</td>
                           <td>{d.customer}</td>
@@ -126,7 +168,8 @@ const Dossiers = () => {
                   ))}
                 </tbody>
               </table>
-              )}
+              )
+              })()}
             </div>
           )}
         </div>

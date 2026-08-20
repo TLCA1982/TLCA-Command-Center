@@ -336,7 +336,9 @@ const Dashboard = () => {
 
   const visibleActions = useMemo(() => {
     const list = activeFilter === 'all' ? actions : actions.filter((action) => matchesFilter(action, activeFilter))
-    const filtered = showCompleted ? list.filter((a) => a.status === 'Afgewerkt') : list.filter((a) => a.status !== 'Afgewerkt')
+    const filtered = showCompleted
+      ? list.filter((a) => a.status === 'Afgewerkt' && a.source === 'Command Center')
+      : list.filter((a) => a.status !== 'Afgewerkt')
     const q = searchCustomer.trim().toLowerCase()
     const searched = q ? filtered.filter((a) => (a.customer ?? '').toLowerCase().includes(q)) : filtered
 

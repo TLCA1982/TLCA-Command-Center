@@ -25,6 +25,20 @@ GRAPH_TIMEZONE_MAP = {
 TARGET_TIMEZONE = ZoneInfo("Europe/Brussels")
 
 
+async def _get_all_todo_tasks(http_client: httpx.AsyncClient, list_id: str, headers: dict[str, str]) -> list[dict[str, Any]]:
+    next_url = f"https://graph.microsoft.com/v1.0/me/todo/lists/{list_id}/tasks"
+    tasks: list[dict[str, Any]] = []
+
+    while next_url:
+        tasks_response = await http_client.get(next_url, headers=headers)
+        tasks_response.raise_for_status()
+        tasks_payload = tasks_response.json()
+        tasks.extend(tasks_payload.get("value", []))
+        next_url = tasks_payload.get("@odata.nextLink")
+
+    return tasks
+
+
 def _normalize_date(value: Any) -> str:
     if not value:
         return ""
@@ -166,11 +180,9 @@ async def get_microsoft_actions() -> list[dict[str, Any]]:
                 is_flagged_list = list_item.get("wellknownListName") == "flaggedEmails"
                 source = "Outlook gemarkeerde mail" if is_flagged_list else "Microsoft To Do"
 
-                tasks_response = await http_client.get(f"https://graph.microsoft.com/v1.0/me/todo/lists/{list_id}/tasks", headers=headers)
-                tasks_response.raise_for_status()
-                tasks_payload = tasks_response.json()
+                tasks = await _get_all_todo_tasks(http_client, list_id, headers)
 
-                for task in tasks_payload.get("value", []):
+                for task in tasks:
                     normalized = _normalize_task(task, source, list_name)
                     if not normalized["id"]:
                         continue
@@ -406,9 +418,7 @@ async def update_microsoft_action(action_id: str, payload: dict[str, Any]) -> di
                 list_id = list_item.get("id")
                 if not list_id:
                     continue
-                tasks_resp = await http_client.get(f"https://graph.microsoft.com/v1.0/me/todo/lists/{list_id}/tasks", headers=headers)
-                tasks_resp.raise_for_status()
-                tasks = tasks_resp.json().get("value", [])
+                tasks = await _get_all_todo_tasks(http_client, list_id, headers)
                 for task in tasks:
                     if task.get("id") == action_id:
                         # determine source for metadata
@@ -496,9 +506,7 @@ async def delete_microsoft_action(action_id: str) -> dict[str, Any]:
                 list_id = list_item.get("id")
                 if not list_id:
                     continue
-                tasks_resp = await http_client.get(f"https://graph.microsoft.com/v1.0/me/todo/lists/{list_id}/tasks", headers=headers)
-                tasks_resp.raise_for_status()
-                tasks = tasks_resp.json().get("value", [])
+                tasks = await _get_all_todo_tasks(http_client, list_id, headers)
                 for task in tasks:
                     if task.get("id") == action_id:
                         # delete the task

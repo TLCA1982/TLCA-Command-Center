@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -14,6 +16,15 @@ from app.services import dossiers as dossier_service
 router = APIRouter(prefix="/actions", tags=["actions"])
 
 
+GRAPH_TIMEZONE_MAP = {
+    "UTC": "UTC",
+    "W. Europe Standard Time": "Europe/Berlin",
+    "Romance Standard Time": "Europe/Paris",
+    "Central Europe Standard Time": "Europe/Budapest",
+}
+TARGET_TIMEZONE = ZoneInfo("Europe/Brussels")
+
+
 def _normalize_date(value: Any) -> str:
     if not value:
         return ""
@@ -22,7 +33,23 @@ def _normalize_date(value: Any) -> str:
         return value.split("T")[0]
 
     if isinstance(value, dict):
-        date_value = value.get("dateTime") or value.get("date")
+        date_value = value.get("dateTime")
+        if date_value:
+            raw_timezone = str(value.get("timeZone") or "UTC")
+            timezone_name = GRAPH_TIMEZONE_MAP.get(raw_timezone, raw_timezone)
+
+            try:
+                source_timezone = ZoneInfo(timezone_name)
+            except Exception:
+                source_timezone = timezone.utc
+
+            parsed = datetime.fromisoformat(str(date_value).rstrip("Z"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=source_timezone)
+
+            return parsed.astimezone(TARGET_TIMEZONE).date().isoformat()
+
+        date_value = value.get("date")
         if date_value:
             return str(date_value).split("T")[0]
 
@@ -397,6 +424,20 @@ async def update_microsoft_action(action_id: str, payload: dict[str, Any]) -> di
                                 flush=True,
                             )
                         patch_resp.raise_for_status()
+
+                        if is_flagged and payload.get("dueDate") and mapped == "waitingOnOthers":
+                            status_patch_resp = await http_client.patch(
+                                f"https://graph.microsoft.com/v1.0/me/todo/lists/{list_id}/tasks/{action_id}",
+                                headers=headers,
+                                json={"status": "waitingOnOthers"},
+                            )
+                            if status_patch_resp.is_error:
+                                print(
+                                    f"[Microsoft action update] Graph status PATCH failed: "
+                                    f"status={status_patch_resp.status_code} body={status_patch_resp.text}",
+                                    flush=True,
+                                )
+                            status_patch_resp.raise_for_status()
 
                         # after successful Graph update, persist local metadata if provided in payload
                         try:

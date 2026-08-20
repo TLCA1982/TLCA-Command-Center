@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
@@ -171,7 +172,19 @@ async def get_microsoft_actions() -> list[dict[str, Any]]:
             lists_response.raise_for_status()
             lists_payload = lists_response.json()
 
-            for list_item in lists_payload.get("value", []):
+            list_items = [item for item in lists_payload.get("value", []) if item.get("id")]
+            list_semaphore = asyncio.Semaphore(4)
+
+            async def fetch_list_tasks(list_item: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+                async with list_semaphore:
+                    return list_item, await _get_all_todo_tasks(http_client, list_item["id"], headers)
+
+            fetched_lists: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+            for offset in range(0, len(list_items), 4):
+                fetched_lists.extend(await asyncio.gather(*(fetch_list_tasks(item) for item in list_items[offset:offset + 4])))
+
+            pending_actions: list[tuple[dict[str, Any], dict[str, Any], bool]] = []
+            for list_item, tasks in fetched_lists:
                 list_id = list_item.get("id")
                 if not list_id:
                     continue
@@ -180,24 +193,41 @@ async def get_microsoft_actions() -> list[dict[str, Any]]:
                 is_flagged_list = list_item.get("wellknownListName") == "flaggedEmails"
                 source = "Outlook gemarkeerde mail" if is_flagged_list else "Microsoft To Do"
 
-                tasks = await _get_all_todo_tasks(http_client, list_id, headers)
-
                 for task in tasks:
+                    if task.get("status") == "completed":
+                        continue
+
                     normalized = _normalize_task(task, source, list_name)
                     if not normalized["id"]:
                         continue
 
-                    if is_flagged_list:
-                        normalized.update(await _get_flagged_email_sender(http_client, headers, task))
+                    pending_actions.append((normalized, task, is_flagged_list))
 
-                    # merge local metadata if present
-                    meta = microsoft_metadata.get(normalized["id"]) or {}
-                    normalized["customer"] = meta.get("customer", "")
-                    normalized["contact"] = meta.get("contact", "")
-                    # return actionType in the same field name used by manual actions
-                    normalized["actionType"] = meta.get("action_type") or normalized.get("actionType") or ""
+            sender_semaphore = asyncio.Semaphore(6)
 
-                    combined.setdefault(normalized["id"], normalized)
+            async def fetch_sender(task: dict[str, Any]) -> dict[str, str]:
+                async with sender_semaphore:
+                    return await _get_flagged_email_sender(http_client, headers, task)
+
+            sender_indices = [(index, task) for index, (_normalized, task, is_flagged) in enumerate(pending_actions) if is_flagged]
+            sender_results: dict[int, dict[str, str]] = {}
+            for offset in range(0, len(sender_indices), 6):
+                batch = sender_indices[offset:offset + 6]
+                results = await asyncio.gather(*(fetch_sender(task) for _index, task in batch))
+                sender_results.update({index: result for (index, _task), result in zip(batch, results)})
+
+            for index, (normalized, _task, _is_flagged) in enumerate(pending_actions):
+                if index in sender_results:
+                    normalized.update(sender_results[index])
+
+                # merge local metadata if present
+                meta = microsoft_metadata.get(normalized["id"]) or {}
+                normalized["customer"] = meta.get("customer", "")
+                normalized["contact"] = meta.get("contact", "")
+                # return actionType in the same field name used by manual actions
+                normalized["actionType"] = meta.get("action_type") or normalized.get("actionType") or ""
+
+                combined.setdefault(normalized["id"], normalized)
 
     except httpx.HTTPStatusError as exc:
         raise HTTPException(status_code=exc.response.status_code, detail="Microsoft Graph request failed while collecting actions.") from exc

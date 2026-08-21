@@ -19,6 +19,7 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
   const [saving, setSaving] = useState(false)
   const [loadingCompanies, setLoadingCompanies] = useState(true)
   const [loadingContacts, setLoadingContacts] = useState(false)
+  const [creatingCompany, setCreatingCompany] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -63,6 +64,33 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
     const selected = companies.find((company) => company.name.toLowerCase() === value.trim().toLowerCase())
     setCompanyId(selected?.id ?? '')
     setPrimaryContactId('')
+  }
+
+  const matchingCompany = companies.find((company) => company.name.toLowerCase() === companyName.trim().toLowerCase())
+  const canCreateCompany = companyName.trim().length > 0 && !matchingCompany && !companyId
+
+  const createCompany = async () => {
+    const name = companyName.trim()
+    if (!name || matchingCompany || companyId) return
+    setCreatingCompany(true)
+    setError(null)
+    try {
+      const response = await fetch(apiUrl('/companies'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ name }),
+      })
+      if (!response.ok) throw new Error((await response.text()) || 'Bedrijf aanmaken mislukt')
+      const company = await response.json()
+      setCompanies((current) => [...current, company])
+      setCompanyName(company.name)
+      setCompanyId(company.id)
+      setPrimaryContactId('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Bedrijf aanmaken mislukt')
+    } finally {
+      setCreatingCompany(false)
+    }
   }
 
   const activeContacts = contacts.filter((contact) => contact.is_active)
@@ -118,9 +146,10 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
       <div className="modal-card">
         <h3>Nieuw dossier</h3>
         <label>Bedrijf
-          <input list="dossier-companies" value={companyName} onChange={(e) => selectCompany(e.target.value)} placeholder="Zoek bedrijf..." disabled={loadingCompanies} />
+          <input list="dossier-companies" value={companyName} onChange={(e) => selectCompany(e.target.value)} placeholder="Zoek bedrijf..." disabled={loadingCompanies || creatingCompany} />
           <datalist id="dossier-companies">{companies.map((company) => <option key={company.id} value={company.name} />)}</datalist>
         </label>
+        {canCreateCompany && <button type="button" className="action-btn action-btn--secondary" onClick={createCompany} disabled={creatingCompany}>Nieuw bedrijf aanmaken: {companyName.trim()}</button>}
         <label>Contactpersoon
           <select value={primaryContactId} onChange={(e) => setPrimaryContactId(e.target.value)} disabled={!companyId || loadingContacts}>
             <option value="">Geen primaire contactpersoon</option>
@@ -136,8 +165,8 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
         <label>Opvolgdatum<input type="text" placeholder="dd/mm/jjjj" value={followUp} onChange={(e) => setFollowUp(e.target.value)} /></label>
         {error && <p className="form-error">{error}</p>}
         <div className="modal-actions">
-          <button type="button" onClick={onClose} disabled={saving}>Annuleren</button>
-          <button type="button" onClick={save} disabled={saving} className="action-btn action-btn--primary">Dossier opslaan</button>
+          <button type="button" onClick={onClose} disabled={saving || creatingCompany}>Annuleren</button>
+          <button type="button" onClick={save} disabled={saving || creatingCompany} className="action-btn action-btn--primary">Dossier opslaan</button>
         </div>
       </div>
     </div>

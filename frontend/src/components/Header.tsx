@@ -1,8 +1,8 @@
 type HeaderProps = {
   eyebrow: string
   title: string
-  active?: 'actions' | 'dossiers'
-  onNavigate?: (page: 'actions' | 'dossiers') => void
+  active?: 'actions' | 'dossiers' | 'companies'
+  onNavigate?: (page: 'actions' | 'dossiers' | 'companies') => void
 }
 
 const Header = ({ eyebrow, title, active = 'actions', onNavigate }: HeaderProps) => {
@@ -27,6 +27,13 @@ const Header = ({ eyebrow, title, active = 'actions', onNavigate }: HeaderProps)
           onClick={() => onNavigate && onNavigate('dossiers')}
         >
           Dossiers
+        </button>
+        <button
+          type="button"
+          className={`topbar__navitem ${active === 'companies' ? 'topbar__navitem--active' : ''}`}
+          onClick={() => onNavigate && onNavigate('companies')}
+        >
+          Bedrijven
         </button>
       </nav>
     </header>

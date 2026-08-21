@@ -5,7 +5,7 @@ type Props = {
   companyId: string
   contact?: any
   onClose: () => void
-  onSaved: () => void
+  onSaved: (contact?: any) => void
 }
 
 const toBoolean = (value: unknown, fallback: boolean) => {
@@ -42,7 +42,7 @@ const ContactPersonModal = ({ companyId, contact, onClose, onSaved }: Props) => 
         body: JSON.stringify(fields),
       })
       if (!response.ok) throw new Error((await response.text()) || 'Contactpersoon opslaan mislukt')
-      onSaved()
+      onSaved(await response.json())
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Contactpersoon opslaan mislukt')

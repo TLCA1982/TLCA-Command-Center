@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { belgianToIso, isBelgianDate, isValidBelgianDate } from '../utils/date'
 import { apiUrl } from '../api'
+import ContactPersonModal from './ContactPersonModal'
 
 type Props = {
   onClose: () => void
@@ -20,6 +21,7 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
   const [loadingCompanies, setLoadingCompanies] = useState(true)
   const [loadingContacts, setLoadingContacts] = useState(false)
   const [creatingCompany, setCreatingCompany] = useState(false)
+  const [showContactModal, setShowContactModal] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -95,6 +97,19 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
 
   const activeContacts = contacts.filter((contact) => contact.is_active)
 
+  const refreshContacts = async (createdContact?: any) => {
+    if (!companyId) return
+    try {
+      const response = await fetch(apiUrl(`/companies/${companyId}/contacts`), { headers: { Accept: 'application/json' } })
+      if (!response.ok) throw new Error('Contactpersonen konden niet geladen worden')
+      const refreshedContacts = await response.json()
+      setContacts(refreshedContacts)
+      if (createdContact?.id && createdContact.is_active) setPrimaryContactId(createdContact.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Contactpersonen konden niet geladen worden')
+    }
+  }
+
   const save = async () => {
     const selectedCompany = companies.find((company) => company.id === companyId)
     if (!selectedCompany) {
@@ -156,6 +171,7 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
             {activeContacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}</option>)}
           </select>
         </label>
+        {companyId && <button type="button" className="action-btn action-btn--secondary" onClick={() => setShowContactModal(true)} disabled={saving || creatingCompany}>+ Contactpersoon toevoegen</button>}
         <label>Onderwerp *<input value={subject} onChange={(e) => setSubject(e.target.value)} /></label>
         <label>Status<select value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="Lopend">Lopend</option>
@@ -169,6 +185,7 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
           <button type="button" onClick={save} disabled={saving || creatingCompany} className="action-btn action-btn--primary">Dossier opslaan</button>
         </div>
       </div>
+      {showContactModal && companyId && <ContactPersonModal companyId={companyId} onClose={() => setShowContactModal(false)} onSaved={async (createdContact) => { setShowContactModal(false); await refreshContacts(createdContact) }} />}
     </div>
   )
 }

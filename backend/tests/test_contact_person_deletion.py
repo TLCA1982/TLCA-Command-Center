@@ -62,15 +62,17 @@ class ContactPersonDeletionTests(unittest.TestCase):
             [contact["id"] for contact in self.client.get(f"/companies/{self.company_id}/contacts").json()],
         )
 
-    def test_primary_dossier_contact_cannot_be_deleted(self) -> None:
+    def test_dossier_primary_contact_can_be_deleted_and_reference_is_cleared(self) -> None:
         contact_id = self.create_contact()
         dossier_id = self.create_dossier(contact_id)
 
         response = self.client.delete(f"/companies/{self.company_id}/contacts/{contact_id}")
 
-        self.assertEqual(response.status_code, 409, response.text)
-        self.assertIn("primary contact", response.json()["detail"])
-        self.assertEqual(self.client.get(f"/dossiers/{dossier_id}").status_code, 200)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.contact_ids.remove(contact_id)
+        dossier = self.client.get(f"/dossiers/{dossier_id}")
+        self.assertEqual(dossier.status_code, 200, dossier.text)
+        self.assertIsNone(dossier.json()["primary_contact_person_id"])
 
     def test_event_contact_cannot_be_deleted(self) -> None:
         contact_id = self.create_contact()
@@ -89,7 +91,7 @@ class ContactPersonDeletionTests(unittest.TestCase):
         response = self.client.delete(f"/companies/{self.company_id}/contacts/{contact_id}")
 
         self.assertEqual(response.status_code, 409, response.text)
-        self.assertIn("dossier event", response.json()["detail"])
+        self.assertIn("contact-moment history", response.json()["detail"])
 
 
 if __name__ == "__main__":

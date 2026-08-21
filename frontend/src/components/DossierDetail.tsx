@@ -7,9 +7,11 @@ import { apiUrl } from '../api'
 
 type Props = { id: string; onClose: () => void }
 
+const isPrimaryContact = (contact: any) => contact.is_primary === true || contact.is_primary === 1 || contact.is_primary === '1' || contact.is_primary === 'true'
+
 const ContactSummary = ({ contact }: { contact: any }) => (
   <div className="contact-summary">
-    <strong>{contact.name} {contact.is_primary && <span className="contact-badge contact-badge--primary">Primair</span>} {!contact.is_active && <span className="contact-badge contact-badge--inactive">Inactief</span>}</strong>
+    <strong>{contact.name} {isPrimaryContact(contact) && <span className="contact-badge contact-badge--primary">Primair</span>} {!contact.is_active && <span className="contact-badge contact-badge--inactive">Inactief</span>}</strong>
     {contact.job_title && <span>{contact.job_title}</span>}
     {contact.email && <span>{contact.email}</span>}
     {contact.phone && <span>{contact.phone}</span>}

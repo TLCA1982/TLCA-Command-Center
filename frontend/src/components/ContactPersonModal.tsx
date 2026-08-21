@@ -8,14 +8,21 @@ type Props = {
   onSaved: () => void
 }
 
+const toBoolean = (value: unknown, fallback: boolean) => {
+  if (typeof value === 'boolean') return value
+  if (value === 1 || value === '1' || value === 'true') return true
+  if (value === 0 || value === '0' || value === 'false') return false
+  return fallback
+}
+
 const ContactPersonModal = ({ companyId, contact, onClose, onSaved }: Props) => {
   const [fields, setFields] = useState({
     name: contact?.name ?? '',
     email: contact?.email ?? '',
     phone: contact?.phone ?? '',
     job_title: contact?.job_title ?? '',
-    is_active: contact?.is_active ?? true,
-    is_primary: contact?.is_primary ?? false,
+    is_active: toBoolean(contact?.is_active, true),
+    is_primary: toBoolean(contact?.is_primary, false),
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)

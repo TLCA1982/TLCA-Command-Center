@@ -211,7 +211,7 @@ def create_contact(company_id: str, payload: Dict[str, Any]) -> Optional[Dict[st
             """,
             contact,
         )
-    return contact
+        return _get_contact(conn, company_id, contact["id"]) or contact
 
 
 def update_contact(company_id: str, contact_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -259,21 +259,17 @@ def delete_contact(company_id: str, contact_id: str) -> bool:
         contact = _get_contact(conn, company_id, contact_id)
         if contact is None:
             return False
-        primary_dossier = conn.execute(
-            "SELECT 1 FROM dossiers WHERE primary_contact_person_id = ? LIMIT 1",
-            (contact_id,),
-        ).fetchone()
-        if primary_dossier is not None:
-            raise ContactPersonInUseError(
-                "Contact person cannot be deleted because it is the primary contact of a dossier"
-            )
         dossier_event = conn.execute(
             "SELECT 1 FROM dossier_events WHERE contact_person_id = ? LIMIT 1",
             (contact_id,),
         ).fetchone()
         if dossier_event is not None:
             raise ContactPersonInUseError(
-                "Contact person cannot be deleted because it is referenced by a dossier event"
+                "Contact person cannot be deleted because it is used in contact-moment history"
             )
+        conn.execute(
+            "UPDATE dossiers SET primary_contact_person_id = NULL WHERE primary_contact_person_id = ?",
+            (contact_id,),
+        )
         conn.execute("DELETE FROM contact_persons WHERE id = ? AND company_id = ?", (contact_id, company_id))
     return True

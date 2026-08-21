@@ -100,7 +100,7 @@ const Dossiers = () => {
               <h2>Dossiers</h2>
               <div style={{ marginTop: 8 }}>
                 <input
-                  placeholder="Zoeken op klant..."
+                  placeholder="Zoeken op bedrijf..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid #e2e8f0', width: 260 }}
@@ -123,7 +123,7 @@ const Dossiers = () => {
                 const filteredItems = items.filter((d) => {
                 const q = search.trim().toLowerCase()
                 if (!q) return true
-                return (d.customer || '').toLowerCase().includes(q)
+                return (d.company?.name || d.customer || '').toLowerCase().includes(q)
                 })
                 const visibleItems = sortKey ? [...filteredItems].sort((left, right) => {
                   const leftValue = sortFields[sortKey](left)
@@ -138,13 +138,13 @@ const Dossiers = () => {
                 }) : filteredItems
 
                 return visibleItems.length === 0 ? (
-                <p className="table-card__subtitle">Geen dossiers gevonden voor deze klant.</p>
+                <p className="table-card__subtitle">Geen dossiers gevonden voor dit bedrijf.</p>
               ) : (
               <table>
                 <thead>
                   <tr>
                     <th>{sortableHeader('last_activity', 'Laatste activiteit')}</th>
-                    <th>{sortableHeader('customer', 'Klant')}</th>
+                    <th>{sortableHeader('customer', 'Bedrijf')}</th>
                     <th>{sortableHeader('contact', 'Contactpersoon')}</th>
                     <th>{sortableHeader('subject', 'Onderwerp')}</th>
                     <th>{sortableHeader('last_contact', 'Laatste contact')}</th>
@@ -157,7 +157,7 @@ const Dossiers = () => {
                   {visibleItems.map((d) => (
                     <tr key={d.id} onClick={() => setOpenDossierId(d.id)} style={{ cursor: 'pointer' }}>
                           <td>{isoToBelgian(d.last_activity ?? d.created_at ?? '')}</td>
-                          <td>{d.customer}</td>
+                          <td>{d.company?.name || d.customer}</td>
                           <td>{d.contact}</td>
                           <td>{d.subject}</td>
                           <td>{/* last contact type could be derived later */}</td>

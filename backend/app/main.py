@@ -5,6 +5,7 @@ from app.config import get_settings
 from app.routers.actions import router as actions_router
 from app.routers.microsoft import router as microsoft_router
 from app.routers.dossiers import router as dossiers_router
+from app.routers.companies import router as companies_router
 
 settings = get_settings()
 
@@ -27,3 +28,4 @@ def read_root() -> dict[str, str]:
 app.include_router(microsoft_router)
 app.include_router(actions_router)
 app.include_router(dossiers_router)
+app.include_router(companies_router)

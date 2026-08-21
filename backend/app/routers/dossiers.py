@@ -36,6 +36,8 @@ async def create_dossier(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         d = dossier_service.create(payload)
         return d
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -47,6 +49,8 @@ async def update_dossier(dossier_id: str, payload: dict[str, Any]) -> dict[str, 
         if d is None:
             raise HTTPException(status_code=404, detail="Dossier not found")
         return d
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as exc:
@@ -60,6 +64,8 @@ async def add_event(dossier_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         if d is None:
             raise HTTPException(status_code=404, detail="Dossier not found")
         return d
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as exc:
@@ -73,6 +79,8 @@ async def update_event(dossier_id: str, event_id: str, payload: dict[str, Any]) 
         if d is None:
             raise HTTPException(status_code=404, detail="Dossier or event not found")
         return d
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as exc:

@@ -6,6 +6,8 @@ from pathlib import Path
 import uuid
 from typing import Any, Dict, List, Optional
 
+from app.services import companies as company_service
+
 
 DB_PATH = Path(__file__).resolve().parents[3] / "database" / "actions.db"
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -58,6 +60,79 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     return {k: row[k] for k in row.keys()}
 
 
+def _with_event_contact(conn: sqlite3.Connection, event: Dict[str, Any]) -> Dict[str, Any]:
+    contact_id = event.get("contact_person_id")
+    event["contact_person"] = None
+    if contact_id is not None:
+        row = conn.execute("SELECT * FROM contact_persons WHERE id = ?", (contact_id,)).fetchone()
+        if row is not None:
+            event["contact_person"] = _row_to_dict(row)
+    return event
+
+
+def _with_relationships(conn: sqlite3.Connection, dossier: Dict[str, Any]) -> Dict[str, Any]:
+    company_id = dossier.get("company_id")
+    contact_id = dossier.get("primary_contact_person_id")
+    dossier["company"] = None
+    dossier["primary_contact_person"] = None
+    if company_id:
+        row = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
+        if row is not None:
+            dossier["company"] = _row_to_dict(row)
+    if contact_id:
+        row = conn.execute("SELECT * FROM contact_persons WHERE id = ?", (contact_id,)).fetchone()
+        if row is not None:
+            dossier["primary_contact_person"] = _row_to_dict(row)
+    return dossier
+
+
+def _resolve_relationship(
+    conn: sqlite3.Connection,
+    payload: Dict[str, Any],
+) -> tuple[Optional[str], Optional[str], str, str]:
+    company_id = payload.get("company_id") if "company_id" in payload else None
+    contact_id = payload.get("primary_contact_person_id") if "primary_contact_person_id" in payload else None
+    if company_id is not None:
+        company = conn.execute("SELECT id, name FROM companies WHERE id = ?", (company_id,)).fetchone()
+        if company is None:
+            raise ValueError("Company not found")
+        customer = company[1]
+        if contact_id is not None:
+            contact = conn.execute(
+                "SELECT id, name FROM contact_persons WHERE id = ? AND company_id = ?",
+                (contact_id, company_id),
+            ).fetchone()
+            if contact is None:
+                raise ValueError("Primary contact person does not belong to the company")
+            legacy_contact = contact[1]
+        else:
+            legacy_contact = ""
+        return company_id, contact_id, customer, legacy_contact
+    if contact_id is not None:
+        raise ValueError("A company is required when primary_contact_person_id is supplied")
+    return None, None, payload.get("customer", ""), payload.get("contact", "")
+
+
+def _validate_event_contact(
+    conn: sqlite3.Connection,
+    dossier_id: str,
+    contact_id: Optional[str],
+) -> None:
+    if contact_id is None:
+        return
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM dossiers d
+        JOIN contact_persons p ON p.company_id = d.company_id
+        WHERE d.id = ? AND p.id = ?
+        """,
+        (dossier_id, contact_id),
+    ).fetchone()
+    if row is None:
+        raise ValueError("Event contact person does not belong to the dossier's company")
+
+
 def get_all(active_only: bool = True) -> List[Dict[str, Any]]:
     results: List[Dict[str, Any]] = []
     with _get_conn() as conn:
@@ -82,7 +157,7 @@ def get_all(active_only: bool = True) -> List[Dict[str, Any]]:
                 created = d.get("created_at") or ""
                 d["last_activity"] = created.split("T")[0] if created else ""
 
-            results.append(d)
+            results.append(_with_relationships(conn, d))
 
     return results
 
@@ -94,8 +169,9 @@ def get_by_id(dossier_id: str) -> Optional[Dict[str, Any]]:
         if row is None:
             return None
         dossier = _row_to_dict(row)
+        _with_relationships(conn, dossier)
         ev_cur = conn.execute("SELECT * FROM dossier_events WHERE dossier_id = ? ORDER BY event_date DESC", (dossier_id,))
-        events = [ _row_to_dict(e) for e in ev_cur.fetchall() ]
+        events = [_with_event_contact(conn, _row_to_dict(e)) for e in ev_cur.fetchall()]
         dossier["events"] = events
         return dossier
 
@@ -103,10 +179,12 @@ def get_by_id(dossier_id: str) -> Optional[Dict[str, Any]]:
 def create(payload: Dict[str, Any]) -> Dict[str, Any]:
     now = datetime.utcnow().isoformat()
     dossier_id = str(uuid.uuid4())
+    with _get_conn() as conn:
+        company_id, primary_contact_id, customer, contact = _resolve_relationship(conn, payload)
     params = {
         "id": dossier_id,
-        "customer": payload.get("customer", ""),
-        "contact": payload.get("contact", ""),
+        "customer": customer,
+        "contact": contact,
         "subject": payload.get("subject", ""),
         "status": payload.get("status", "Lopend"),
         "follow_up_date": payload.get("follow_up_date", ""),
@@ -114,16 +192,23 @@ def create(payload: Dict[str, Any]) -> Dict[str, Any]:
         "external_id": payload.get("external_id"),
         "created_at": now,
         "updated_at": now,
+        "company_id": company_id,
+        "primary_contact_person_id": primary_contact_id,
     }
     with _get_conn() as conn:
         conn.execute(
             """
-            INSERT INTO dossiers (id, customer, contact, subject, status, follow_up_date, source, external_id, created_at, updated_at)
-            VALUES (:id, :customer, :contact, :subject, :status, :follow_up_date, :source, :external_id, :created_at, :updated_at)
+            INSERT INTO dossiers (
+                id, customer, contact, subject, status, follow_up_date, source,
+                external_id, created_at, updated_at, company_id, primary_contact_person_id
+            ) VALUES (
+                :id, :customer, :contact, :subject, :status, :follow_up_date, :source,
+                :external_id, :created_at, :updated_at, :company_id, :primary_contact_person_id
+            )
             """,
             params,
         )
-    return params
+    return get_by_id(dossier_id) or params
 
 
 def update(dossier_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -132,10 +217,11 @@ def update(dossier_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]
         cur = conn.execute("SELECT id FROM dossiers WHERE id = ?", (dossier_id,))
         if cur.fetchone() is None:
             return None
+        company_id, primary_contact_id, customer, contact = _resolve_relationship(conn, payload)
         params = {
             "id": dossier_id,
-            "customer": payload.get("customer", ""),
-            "contact": payload.get("contact", ""),
+            "customer": customer,
+            "contact": contact,
             "subject": payload.get("subject", ""),
             "status": payload.get("status", "Lopend"),
             "follow_up_date": payload.get("follow_up_date", ""),
@@ -146,13 +232,21 @@ def update(dossier_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]
             UPDATE dossiers SET
                 customer = :customer,
                 contact = :contact,
+                company_id = CASE WHEN :company_id_supplied THEN :company_id ELSE company_id END,
+                primary_contact_person_id = CASE WHEN :contact_id_supplied THEN :primary_contact_person_id ELSE primary_contact_person_id END,
                 subject = :subject,
                 status = :status,
                 follow_up_date = :follow_up_date,
                 updated_at = :updated_at
             WHERE id = :id
             """,
-            params,
+            {
+                **params,
+                "company_id": company_id,
+                "primary_contact_person_id": primary_contact_id,
+                "company_id_supplied": int("company_id" in payload),
+                "contact_id_supplied": int("primary_contact_person_id" in payload),
+            },
         )
     return get_by_id(dossier_id)
 
@@ -160,6 +254,9 @@ def update(dossier_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]
 def add_event(dossier_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     now = datetime.utcnow().isoformat()
     event_id = str(uuid.uuid4())
+    contact_person_id = payload.get("contact_person_id")
+    if contact_person_id is not None and str(contact_person_id).strip() == "":
+        contact_person_id = None
     params = {
         "id": event_id,
         "dossier_id": dossier_id,
@@ -168,16 +265,23 @@ def add_event(dossier_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, An
         "notes": payload.get("notes", ""),
         "follow_up_date": payload.get("follow_up_date"),
         "status_change": payload.get("status_change"),
+        "contact_person_id": contact_person_id,
         "created_at": now,
     }
     with _get_conn() as conn:
         cur = conn.execute("SELECT id FROM dossiers WHERE id = ?", (dossier_id,))
         if cur.fetchone() is None:
             return None
+        _validate_event_contact(conn, dossier_id, params["contact_person_id"])
         conn.execute(
             """
-            INSERT INTO dossier_events (id, dossier_id, event_date, event_type, notes, follow_up_date, status_change, created_at)
-            VALUES (:id, :dossier_id, :event_date, :event_type, :notes, :follow_up_date, :status_change, :created_at)
+            INSERT INTO dossier_events (
+                id, dossier_id, event_date, event_type, notes, follow_up_date,
+                status_change, contact_person_id, created_at
+            ) VALUES (
+                :id, :dossier_id, :event_date, :event_type, :notes, :follow_up_date,
+                :status_change, :contact_person_id, :created_at
+            )
             """,
             params,
         )
@@ -232,15 +336,24 @@ def update_event(dossier_id: str, event_id: str, payload: Dict[str, Any]) -> Opt
             "event_type": payload.get("event_type"),
             "notes": payload.get("notes"),
             "follow_up_date": payload.get("follow_up_date"),
+            "contact_person_id": payload.get("contact_person_id"),
         }
+        if event_params["contact_person_id"] is not None and str(event_params["contact_person_id"]).strip() == "":
+            event_params["contact_person_id"] = None
 
         # Build SET clause dynamically for only provided keys (except id)
         set_parts = []
         exec_params: Dict[str, Any] = {"id": event_id}
-        for key in ("event_date", "event_type", "notes", "follow_up_date"):
-            if event_params.get(key) is not None:
+        _validate_event_contact(conn, dossier_id, event_params["contact_person_id"])
+        for key in ("event_date", "event_type", "notes", "follow_up_date", "contact_person_id"):
+            if key not in payload:
+                continue
+            value = event_params.get(key)
+            if value is None:
+                set_parts.append(f"{key} = NULL")
+            else:
                 set_parts.append(f"{key} = :{key}")
-                exec_params[key] = event_params.get(key)
+                exec_params[key] = value
 
         if set_parts:
             sql = f"UPDATE dossier_events SET {', '.join(set_parts)} WHERE id = :id"

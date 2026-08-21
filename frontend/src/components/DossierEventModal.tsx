@@ -4,13 +4,14 @@ import { apiUrl } from '../api'
 
 type Props = {
   dossierId: string
+  dossierCompanyId?: string
   currentStatus?: string
   onClose: () => void
   onSaved: () => void
   initialEvent?: any
 }
 
-const DossierEventModal = ({ dossierId, currentStatus = 'Lopend', onClose, onSaved, initialEvent }: Props) => {
+const DossierEventModal = ({ dossierId, dossierCompanyId, currentStatus = 'Lopend', onClose, onSaved, initialEvent }: Props) => {
   const today = new Date()
   const dd = String(today.getDate()).padStart(2, '0')
   const mm = String(today.getMonth() + 1).padStart(2, '0')
@@ -20,6 +21,8 @@ const DossierEventModal = ({ dossierId, currentStatus = 'Lopend', onClose, onSav
   const [notes, setNotes] = useState('')
   const [followUp, setFollowUp] = useState('')
   const [status, setStatus] = useState(currentStatus)
+  const [contactPersonId, setContactPersonId] = useState('')
+  const [contactPersons, setContactPersons] = useState<any[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -27,7 +30,27 @@ const DossierEventModal = ({ dossierId, currentStatus = 'Lopend', onClose, onSav
 
   // populate fields when editing an existing event (useEffect to avoid setState during render)
   useEffect(() => {
-    if (!initialEvent) return
+    if (!dossierCompanyId) {
+      setContactPersons([])
+      setContactPersonId('')
+      return
+    }
+
+    fetch(apiUrl(`/companies/${dossierCompanyId}/contacts`), { headers: { Accept: 'application/json' } })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Contactpersonen konden niet geladen worden')
+        const items = await response.json()
+        setContactPersons(items || [])
+        setContactPersonId(initialEvent?.contact_person_id ?? '')
+      })
+      .catch(() => setError('Contactpersonen konden niet geladen worden'))
+  }, [dossierCompanyId, initialEvent?.contact_person_id])
+
+  useEffect(() => {
+    if (!initialEvent) {
+      setContactPersonId('')
+      return
+    }
     try {
       const e = initialEvent
       if (e.event_date) {
@@ -41,6 +64,7 @@ const DossierEventModal = ({ dossierId, currentStatus = 'Lopend', onClose, onSav
         setFollowUp(isoToBelgian(e.follow_up_date))
       }
       if (initialEvent.status_change) setStatus(initialEvent.status_change)
+      setContactPersonId(e.contact_person_id ?? '')
     } catch (_) {
       // ignore parsing errors and keep defaults
     }
@@ -73,6 +97,8 @@ const DossierEventModal = ({ dossierId, currentStatus = 'Lopend', onClose, onSav
     }
     if (normalizedFollow) payload['follow_up_date'] = normalizedFollow
     if (status && status !== currentStatus) payload['status_change'] = status
+    if (contactPersonId) payload['contact_person_id'] = contactPersonId
+    else if (editing && initialEvent?.contact_person_id) payload['contact_person_id'] = null
 
     setSaving(true)
     setError(null)
@@ -161,6 +187,18 @@ const DossierEventModal = ({ dossierId, currentStatus = 'Lopend', onClose, onSav
           Nieuwe opvolgdatum
           <input value={followUp} onChange={(e) => setFollowUp(e.target.value)} placeholder="dd/mm/jjjj" />
         </label>
+
+        {dossierCompanyId && (
+          <label>
+            Contactpersoon
+            <select value={contactPersonId} onChange={(e) => setContactPersonId(e.target.value)} disabled={!dossierCompanyId || !contactPersons.length}>
+              <option value="">Geen contactpersoon</option>
+              {contactPersons.map((contact) => (
+                <option key={contact.id} value={contact.id}>{contact.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <label>
           Status dossier

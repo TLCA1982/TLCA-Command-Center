@@ -185,7 +185,7 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
           <button type="button" onClick={save} disabled={saving || creatingCompany} className="action-btn action-btn--primary">Dossier opslaan</button>
         </div>
       </div>
-      {showContactModal && companyId && <ContactPersonModal companyId={companyId} onClose={() => setShowContactModal(false)} onSaved={async (createdContact) => { setShowContactModal(false); await refreshContacts(createdContact) }} />}
+      {showContactModal && companyId && <ContactPersonModal allowOutlook companyId={companyId} onClose={() => setShowContactModal(false)} onSaved={async (createdContact) => { setShowContactModal(false); await refreshContacts(createdContact) }} />}
     </div>
   )
 }

@@ -57,6 +57,8 @@ async def list_contacts(company_id: str) -> list[dict[str, Any]]:
 async def create_contact(company_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         contact = company_service.create_contact(company_id, payload)
+    except company_service.OutlookContactCreationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:
         raise _bad_request(exc) from exc
     if contact is None:

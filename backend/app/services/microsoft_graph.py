@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 from pathlib import Path
 from typing import Any
 
@@ -98,19 +100,83 @@ class MicrosoftGraphClient:
         if not accounts:
             raise ValueError("No signed-in Microsoft user session is available. Run the device login flow first.")
 
+        required_scopes = set(self.settings.graph_scope_list)
         for account in accounts:
             result = self._app.acquire_token_silent(self.settings.graph_scope_list, account=account)
-            if "access_token" in result:
-                self._save_token_cache()
-                return str(result["access_token"])
+            access_token = result.get("access_token")
+            if not access_token:
+                continue
+            try:
+                token_parts = str(access_token).split(".")
+                if len(token_parts) != 3:
+                    continue
+                padding = "=" * (-len(token_parts[1]) % 4)
+                claims = json.loads(base64.urlsafe_b64decode(token_parts[1] + padding))
+                granted_scopes = set(str(claims.get("scp", "")).split())
+            except (ValueError, TypeError, json.JSONDecodeError):
+                continue
+            if not required_scopes.issubset(granted_scopes):
+                continue
+            self._save_token_cache()
+            return str(access_token)
 
-        raise ValueError("No signed-in Microsoft user session is available. Run the device login flow first.")
+        raise ValueError("No cached Microsoft token has all required Graph scopes. Run Microsoft login again to grant consent.")
 
     async def get_me(self) -> dict[str, Any]:
         token = self.get_access_token()
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.get("https://graph.microsoft.com/v1.0/me", headers=headers)
+            response.raise_for_status()
+            return response.json()
+
+    async def get_contacts(self) -> list[dict[str, Any]]:
+        token = self.get_access_token()
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        contacts: list[dict[str, Any]] = []
+        next_url: str | None = "https://graph.microsoft.com/v1.0/me/contacts?$select=id,displayName,givenName,surname,companyName,jobTitle,emailAddresses,businessPhones,categories"
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            while next_url:
+                response = await client.get(next_url, headers=headers)
+                response.raise_for_status()
+                payload = response.json()
+                contacts.extend(payload.get("value", []))
+                next_url = payload.get("@odata.nextLink")
+        return contacts
+
+    async def get_contacts_for_categories(self, categories: list[str]) -> list[dict[str, Any]]:
+        token = self.get_access_token()
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        allowed_categories = {category.casefold() for category in categories if category.strip()}
+        contacts_by_id: dict[str, dict[str, Any]] = {}
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            for category in categories:
+                escaped = category.replace("'", "''")
+                next_url: str | None = (
+                    "https://graph.microsoft.com/v1.0/me/contacts"
+                    "?$select=id,displayName,givenName,surname,companyName,jobTitle,emailAddresses,businessPhones,categories"
+                    f"&$filter=categories/any(c:c%20eq%20'{escaped}')"
+                )
+                while next_url:
+                    response = await client.get(next_url, headers=headers)
+                    response.raise_for_status()
+                    payload = response.json()
+                    for contact in payload.get("value", []):
+                        contact_categories = {
+                            category.casefold()
+                            for category in contact.get("categories", [])
+                            if isinstance(category, str)
+                        }
+                        if contact.get("id") and contact_categories.intersection(allowed_categories):
+                            contacts_by_id[contact["id"]] = contact
+                    next_url = payload.get("@odata.nextLink")
+        return list(contacts_by_id.values())
+
+    def create_contact(self, payload: dict[str, Any]) -> dict[str, Any]:
+        token = self.get_access_token()
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/json"}
+        with httpx.Client(timeout=20.0) as client:
+            response = client.post("https://graph.microsoft.com/v1.0/me/contacts", headers=headers, json=payload)
             response.raise_for_status()
             return response.json()
 

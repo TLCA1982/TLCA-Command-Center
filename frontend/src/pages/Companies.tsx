@@ -87,7 +87,7 @@ const Companies = () => {
           {contacts.length ? contacts.map((contact) => <div className="contact-row" key={contact.id}><div className="contact-summary"><strong>{contact.name} {contact.is_primary && <span className="contact-badge contact-badge--primary">Primair</span>} {!contact.is_active && <span className="contact-badge contact-badge--inactive">Inactief</span>}</strong>{contact.job_title && <span>{contact.job_title}</span>}{contact.email && <span>{contact.email}</span>}{contact.phone && <span>{contact.phone}</span>}</div><div className="contact-row__actions"><button type="button" onClick={() => setContactBeingEdited(contact)}>Bewerken</button></div></div>) : <p className="table-card__subtitle">Geen contactpersonen</p>}
         </div>
         <div className="modal-actions"><button type="button" onClick={() => setShowCompanyModal(true)}>Bedrijf bewerken</button></div>
-        {contactBeingEdited !== undefined && <ContactPersonModal companyId={selectedCompany.id} contact={contactBeingEdited || undefined} onClose={() => setContactBeingEdited(undefined)} onSaved={async () => { setContactBeingEdited(undefined); await loadContacts(selectedCompany.id) }} />}
+        {contactBeingEdited !== undefined && <ContactPersonModal allowOutlook companyId={selectedCompany.id} contact={contactBeingEdited || undefined} onClose={() => setContactBeingEdited(undefined)} onSaved={async () => { setContactBeingEdited(undefined); await loadContacts(selectedCompany.id) }} />}
       </div></div>}
       {showCompanyModal && selectedCompany && <CompanyModal company={selectedCompany} onClose={() => setShowCompanyModal(false)} onSaved={refreshCompany} />}
     </div>

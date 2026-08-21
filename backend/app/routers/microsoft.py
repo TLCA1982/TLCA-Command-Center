@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import httpx
 from fastapi import APIRouter, HTTPException
 
 from app.services.microsoft_graph import MicrosoftGraphClient
+from app.services import companies as company_service
+from app.config import get_settings
 
 router = APIRouter(prefix="/microsoft", tags=["microsoft"])
 
@@ -58,3 +61,20 @@ async def get_flagged_emails() -> dict:
         return await client.get_flagged_emails()
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+@router.post("/contacts/reconcile")
+async def reconcile_contacts() -> dict:
+    try:
+        client = MicrosoftGraphClient()
+        configured = client.settings.outlook_business_category_list
+        outlook_contacts = await client.get_contacts_for_categories(configured)
+        result = company_service.reconcile_outlook_contacts(outlook_contacts)
+        return {"configured_categories": configured, **result}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/contacts/reconcile/preview")
+async def preview_contact_reconciliation() -> dict:
+    return {"configured_categories": get_settings().outlook_business_category_list}

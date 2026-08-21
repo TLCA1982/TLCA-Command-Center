@@ -7,8 +7,9 @@ class Settings(BaseSettings):
     app_name: str = "TLCA Command Center"
     microsoft_tenant_id: str | None = None
     microsoft_client_id: str | None = None
-    microsoft_graph_scopes: str = "User.Read,Tasks.ReadWrite,Mail.Read"
+    microsoft_graph_scopes: str = "User.Read,Tasks.ReadWrite,Mail.Read,Contacts.ReadWrite"
     microsoft_authority_host: str = "https://login.microsoftonline.com"
+    outlook_business_categories: str = "Klant/prospect,Leverancier,Partner"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -23,6 +24,10 @@ class Settings(BaseSettings):
     @property
     def graph_scope_list(self) -> list[str]:
         return [scope.strip() for scope in self.microsoft_graph_scopes.split(",") if scope.strip()]
+
+    @property
+    def outlook_business_category_list(self) -> list[str]:
+        return [category.strip() for category in self.outlook_business_categories.split(",") if category.strip()]
 
 
 @lru_cache

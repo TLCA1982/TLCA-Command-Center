@@ -6,6 +6,10 @@ from pathlib import Path
 import uuid
 from typing import Any, Dict, List, Optional
 
+from app.services.microsoft_graph import MicrosoftGraphClient
+
+from app.services.microsoft_graph import MicrosoftGraphClient
+
 
 DB_PATH = Path(__file__).resolve().parents[3] / "database" / "actions.db"
 ALLOWED_RELATIONSHIP_TYPES = {"Klant", "Prospect", "Leverancier"}
@@ -13,6 +17,12 @@ ALLOWED_RELATIONSHIP_TYPES = {"Klant", "Prospect", "Leverancier"}
 
 class ContactPersonInUseError(ValueError):
     """Raised when a contact person is still referenced by dossier data."""
+
+
+class OutlookContactCreationError(ValueError):
+    def __init__(self, contact: Dict[str, Any], reason: str) -> None:
+        super().__init__(reason)
+        self.contact = contact
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -23,6 +33,10 @@ def _get_conn() -> sqlite3.Connection:
 
 def normalize(value: str | None) -> str:
     return " ".join((value or "").casefold().split())
+
+
+def normalize_phone(value: str | None) -> str:
+    return "".join(character for character in (value or "") if character.isdigit())
 
 
 def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
@@ -167,6 +181,71 @@ def _get_contact(connection: sqlite3.Connection, company_id: str, contact_id: st
     return _row_to_dict(row) if row is not None else None
 
 
+def _has_outlook_contact_id(connection: sqlite3.Connection) -> bool:
+    return "outlook_contact_id" in {row[1] for row in connection.execute("PRAGMA table_info(contact_persons)")}
+
+
+def _has_outlook_contact_id(connection: sqlite3.Connection) -> bool:
+    return "outlook_contact_id" in {row[1] for row in connection.execute("PRAGMA table_info(contact_persons)")}
+
+
+def reconcile_outlook_contacts(outlook_contacts: list[Dict[str, Any]]) -> Dict[str, Any]:
+    with _get_conn() as conn:
+        if not _has_outlook_contact_id(conn):
+            raise ValueError("Outlook contact reconciliation requires the pending contact Outlook ID migration")
+        local_rows = conn.execute(
+            """
+            SELECT p.*, c.name AS company_name
+            FROM contact_persons p
+            JOIN companies c ON c.id = p.company_id
+            WHERE p.outlook_contact_id IS NULL
+            """
+        ).fetchall()
+        local = [_row_to_dict(row) | {"company_name": row["company_name"]} for row in local_rows]
+        linked: list[Dict[str, Any]] = []
+        ambiguous: list[Dict[str, Any]] = []
+        unmatched: list[Dict[str, Any]] = []
+
+        def candidates_for(predicate: Any) -> list[Dict[str, Any]]:
+            return [contact for contact in local if contact["outlook_contact_id"] is None and predicate(contact)]
+
+        for outlook in outlook_contacts:
+            outlook_id = outlook.get("id")
+            if not outlook_id:
+                continue
+            emails = [normalize(item.get("address")) for item in outlook.get("emailAddresses", []) if normalize(item.get("address"))]
+            phones = [normalize_phone(phone) for phone in outlook.get("businessPhones", []) if normalize_phone(phone)]
+            name = normalize(outlook.get("displayName") or " ".join(filter(None, [outlook.get("givenName"), outlook.get("surname")])) )
+            company = normalize(outlook.get("companyName"))
+            matches: list[Dict[str, Any]] = []
+            signal = ""
+            for email in emails:
+                matches = candidates_for(lambda contact, email=email: normalize(contact.get("email")) == email)
+                if matches:
+                    signal = "email"
+                    break
+            if not matches:
+                for phone in phones:
+                    matches = candidates_for(lambda contact, phone=phone: normalize_phone(contact.get("phone")) == phone)
+                    if matches:
+                        signal = "phone"
+                        break
+            if not matches and name and company:
+                matches = candidates_for(lambda contact: normalize(contact.get("name")) == name and normalize(contact.get("company_name")) == company)
+                if len(matches) == 1:
+                    signal = "name_company"
+            if len(matches) == 1:
+                contact = matches[0]
+                conn.execute("UPDATE contact_persons SET outlook_contact_id = ? WHERE id = ?", (outlook_id, contact["id"]))
+                contact["outlook_contact_id"] = outlook_id
+                linked.append({"contact_person_id": contact["id"], "outlook_contact_id": outlook_id, "signal": signal})
+            elif len(matches) > 1:
+                ambiguous.append({"outlook_contact_id": outlook_id, "display_name": outlook.get("displayName", ""), "reason": f"multiple {signal or 'name/company'} matches"})
+            else:
+                unmatched.append({"outlook_contact_id": outlook_id, "display_name": outlook.get("displayName", "")})
+        return {"linked": linked, "ambiguous": ambiguous, "unmatched": unmatched}
+
+
 def get_contacts(company_id: str) -> Optional[List[Dict[str, Any]]]:
     with _get_conn() as conn:
         if _get_company(conn, company_id) is None:
@@ -180,6 +259,7 @@ def get_contacts(company_id: str) -> Optional[List[Dict[str, Any]]]:
 
 def create_contact(company_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     values = _contact_payload(payload)
+    add_to_outlook = bool(payload.get("add_to_outlook", False))
     now = datetime.utcnow().isoformat()
     contact = {
         "id": str(uuid.uuid4()),
@@ -199,19 +279,45 @@ def create_contact(company_id: str, payload: Dict[str, Any]) -> Optional[Dict[st
             raise ValueError("A contact person with the same normalized name already exists for this company")
         if values["is_primary"]:
             conn.execute("UPDATE contact_persons SET is_primary = 0 WHERE company_id = ?", (company_id,))
-        conn.execute(
-            """
-            INSERT INTO contact_persons (
-                id, company_id, name, normalized_name, email, phone, job_title,
-                is_active, is_primary, created_at, updated_at
-            ) VALUES (
-                :id, :company_id, :name, :normalized_name, :email, :phone, :job_title,
-                :is_active, :is_primary, :created_at, :updated_at
-            )
-            """,
-            contact,
-        )
-        return _get_contact(conn, company_id, contact["id"]) or contact
+        has_outlook_id = _has_outlook_contact_id(conn)
+        if add_to_outlook and not has_outlook_id:
+            raise ValueError("Outlook contact creation requires the pending contact Outlook ID migration")
+        columns = "id, company_id, name, normalized_name, email, phone, job_title, is_active, is_primary, created_at, updated_at"
+        placeholders = ":id, :company_id, :name, :normalized_name, :email, :phone, :job_title, :is_active, :is_primary, :created_at, :updated_at"
+        if has_outlook_id:
+            columns += ", outlook_contact_id"
+            placeholders += ", :outlook_contact_id"
+            contact["outlook_contact_id"] = None
+        conn.execute(f"INSERT INTO contact_persons ({columns}) VALUES ({placeholders})", contact)
+        saved_contact = _get_contact(conn, company_id, contact["id"]) or contact
+        if not add_to_outlook:
+            return saved_contact
+
+        company = _get_company(conn, company_id)
+        conn.commit()
+        name_parts = saved_contact["name"].split(None, 1)
+        outlook_payload = {
+            "displayName": saved_contact["name"],
+            "givenName": name_parts[0],
+            "surname": name_parts[1] if len(name_parts) > 1 else "",
+            "companyName": company["name"] if company else "",
+            "jobTitle": saved_contact["job_title"],
+            "emailAddresses": ([{"address": saved_contact["email"]}] if saved_contact["email"] else []),
+            "businessPhones": ([saved_contact["phone"]] if saved_contact["phone"] else []),
+        }
+        try:
+            outlook_contact = MicrosoftGraphClient().create_contact(outlook_payload)
+            outlook_id = outlook_contact.get("id")
+            if not outlook_id:
+                raise ValueError("Microsoft Graph returned no Outlook contact ID")
+            conn.execute("UPDATE contact_persons SET outlook_contact_id = ? WHERE id = ?", (outlook_id, contact["id"]))
+            conn.commit()
+            return _get_contact(conn, company_id, contact["id"]) or saved_contact
+        except Exception as exc:
+            raise OutlookContactCreationError(
+                saved_contact,
+                f"Local contact '{saved_contact['name']}' was saved, but Outlook contact creation failed: {exc}",
+            ) from exc
 
 
 def update_contact(company_id: str, contact_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:

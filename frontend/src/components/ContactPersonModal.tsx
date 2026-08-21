@@ -14,10 +14,12 @@ const ContactPersonModal = ({ companyId, contact, onClose, onSaved }: Props) => 
     email: contact?.email ?? '',
     phone: contact?.phone ?? '',
     job_title: contact?.job_title ?? '',
+    is_active: contact?.is_active ?? true,
+    is_primary: contact?.is_primary ?? false,
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const setField = (field: string, value: string) => setFields((current) => ({ ...current, [field]: value }))
+  const setField = (field: string, value: string | boolean) => setFields((current) => ({ ...current, [field]: value }))
 
   const save = async () => {
     if (!fields.name.trim()) {
@@ -50,6 +52,8 @@ const ContactPersonModal = ({ companyId, contact, onClose, onSaved }: Props) => 
         <label>Functie<input value={fields.job_title} onChange={(e) => setField('job_title', e.target.value)} /></label>
         <label>E-mail<input type="email" value={fields.email} onChange={(e) => setField('email', e.target.value)} /></label>
         <label>Telefoon<input value={fields.phone} onChange={(e) => setField('phone', e.target.value)} /></label>
+        <label className="checkbox-field"><input type="checkbox" checked={fields.is_active} onChange={(e) => setFields((current) => ({ ...current, is_active: e.target.checked, is_primary: e.target.checked && current.is_primary }))} />Actief</label>
+        <label className="checkbox-field"><input type="checkbox" checked={fields.is_primary} disabled={!fields.is_active} onChange={(e) => setField('is_primary', e.target.checked)} />Primair contact</label>
         {error && <p className="form-error">{error}</p>}
         <div className="modal-actions">
           <button type="button" onClick={onClose} disabled={saving}>Annuleren</button>

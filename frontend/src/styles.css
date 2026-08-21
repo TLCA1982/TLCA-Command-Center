@@ -391,6 +391,18 @@ tbody tr:hover {
   border: 1px solid #e2e8f0;
 }
 
+.modal-card label.checkbox-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.modal-card .checkbox-field input {
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+}
+
 .modal-card textarea { min-height: 80px }
 
 .modal-actions {
@@ -459,6 +471,26 @@ tbody tr:hover {
 .contact-summary strong {
   color: #0f172a;
   font-size: 0.92rem;
+}
+
+.contact-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  border-radius: 999px;
+  padding: 0.12rem 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.contact-badge--primary {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.contact-badge--inactive {
+  background: #f1f5f9;
+  color: #64748b;
 }
 
 .contact-row {

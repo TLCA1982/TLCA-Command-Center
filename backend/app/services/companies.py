@@ -26,7 +26,11 @@ def normalize(value: str | None) -> str:
 
 
 def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
-    return {key: row[key] for key in row.keys()}
+    result = {key: row[key] for key in row.keys()}
+    for field in ("is_active", "is_primary"):
+        if field in result:
+            result[field] = bool(result[field])
+    return result
 
 
 def _company_payload(payload: Dict[str, Any], *, existing: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -133,6 +137,14 @@ def update(company_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]
         return _get_company(conn, company_id)
 
 
+def _as_bool(value: Any, field: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    raise ValueError(f"{field} must be a boolean")
+
+
 def _contact_payload(payload: Dict[str, Any], *, existing: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     name = str(payload.get("name", existing.get("name", "") if existing else "") or "").strip()
     if not name:
@@ -140,6 +152,10 @@ def _contact_payload(payload: Dict[str, Any], *, existing: Optional[Dict[str, An
     values = {"name": name, "normalized_name": normalize(name)}
     for field in ("email", "phone", "job_title"):
         values[field] = str(payload.get(field, existing.get(field, "") if existing else "") or "").strip()
+    values["is_active"] = _as_bool(payload.get("is_active", existing.get("is_active", True) if existing else True), "is_active")
+    values["is_primary"] = _as_bool(payload.get("is_primary", existing.get("is_primary", False) if existing else False), "is_primary")
+    if not values["is_active"]:
+        values["is_primary"] = False
     return values
 
 
@@ -181,14 +197,16 @@ def create_contact(company_id: str, payload: Dict[str, Any]) -> Optional[Dict[st
         ).fetchone()
         if duplicate is not None:
             raise ValueError("A contact person with the same normalized name already exists for this company")
+        if values["is_primary"]:
+            conn.execute("UPDATE contact_persons SET is_primary = 0 WHERE company_id = ?", (company_id,))
         conn.execute(
             """
             INSERT INTO contact_persons (
                 id, company_id, name, normalized_name, email, phone, job_title,
-                created_at, updated_at
+                is_active, is_primary, created_at, updated_at
             ) VALUES (
                 :id, :company_id, :name, :normalized_name, :email, :phone, :job_title,
-                :created_at, :updated_at
+                :is_active, :is_primary, :created_at, :updated_at
             )
             """,
             contact,
@@ -213,6 +231,11 @@ def update_contact(company_id: str, contact_id: str, payload: Dict[str, Any]) ->
         if duplicate is not None:
             raise ValueError("A contact person with the same normalized name already exists for this company")
         values.update({"id": contact_id, "company_id": company_id, "updated_at": now})
+        if values["is_primary"]:
+            conn.execute(
+                "UPDATE contact_persons SET is_primary = 0 WHERE company_id = ? AND id != ?",
+                (company_id, contact_id),
+            )
         conn.execute(
             """
             UPDATE contact_persons SET
@@ -221,6 +244,8 @@ def update_contact(company_id: str, contact_id: str, payload: Dict[str, Any]) ->
                 email = :email,
                 phone = :phone,
                 job_title = :job_title,
+                is_active = :is_active,
+                is_primary = :is_primary,
                 updated_at = :updated_at
             WHERE id = :id AND company_id = :company_id
             """,

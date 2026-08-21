@@ -65,6 +65,8 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
     setPrimaryContactId('')
   }
 
+  const activeContacts = contacts.filter((contact) => contact.is_active)
+
   const save = async () => {
     const selectedCompany = companies.find((company) => company.id === companyId)
     if (!selectedCompany) {
@@ -122,7 +124,7 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
         <label>Contactpersoon
           <select value={primaryContactId} onChange={(e) => setPrimaryContactId(e.target.value)} disabled={!companyId || loadingContacts}>
             <option value="">Geen primaire contactpersoon</option>
-            {contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}</option>)}
+            {activeContacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}</option>)}
           </select>
         </label>
         <label>Onderwerp *<input value={subject} onChange={(e) => setSubject(e.target.value)} /></label>

@@ -9,7 +9,7 @@ type Props = { id: string; onClose: () => void }
 
 const ContactSummary = ({ contact }: { contact: any }) => (
   <div className="contact-summary">
-    <strong>{contact.name}</strong>
+    <strong>{contact.name} {contact.is_primary && <span className="contact-badge contact-badge--primary">Primair</span>} {!contact.is_active && <span className="contact-badge contact-badge--inactive">Inactief</span>}</strong>
     {contact.job_title && <span>{contact.job_title}</span>}
     {contact.email && <span>{contact.email}</span>}
     {contact.phone && <span>{contact.phone}</span>}
@@ -90,6 +90,8 @@ const DossierDetail = ({ id, onClose }: Props) => {
       .catch((err) => setError(err instanceof Error ? err.message : 'Contactpersonen konden niet geladen worden'))
   }, [data?.company_id])
 
+  const selectableContacts = contacts.filter((contact) => contact.is_active || contact.id === primaryContactId)
+
   const selectCompany = (value: string) => {
     setCompanyName(value)
     const selected = companies.find((company) => company.name.toLowerCase() === value.trim().toLowerCase())
@@ -155,7 +157,7 @@ const DossierDetail = ({ id, onClose }: Props) => {
         <p><strong>Onderwerp:</strong> {data.subject}</p><p><strong>Status:</strong> {data.status}</p><p><strong>Opvolgdatum:</strong> {data.follow_up_date ? isoToBelgian(data.follow_up_date) : ''}</p>
       </> : <>
         <label>Bedrijf<input list="detail-companies" value={companyName} onChange={(e) => selectCompany(e.target.value)} /><datalist id="detail-companies">{companies.map((company) => <option key={company.id} value={company.name} />)}</datalist></label>
-        <label>Contactpersoon<select value={primaryContactId} onChange={(e) => setPrimaryContactId(e.target.value)} disabled={!companyId}><option value="">Geen primaire contactpersoon</option>{contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}</option>)}</select></label>
+        <label>Contactpersoon<select value={primaryContactId} onChange={(e) => setPrimaryContactId(e.target.value)} disabled={!companyId}><option value="">Geen primaire contactpersoon</option>{selectableContacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}{!contact.is_active ? ' (inactief)' : ''}</option>)}</select></label>
         <label>Onderwerp *<input value={subject} onChange={(e) => setSubject(e.target.value)} /></label>
         <label>Status<select value={status} onChange={(e) => setStatus(e.target.value)}><option>Lopend</option><option>Wachtend</option><option>Afgesloten</option></select></label>
         <label>Opvolgdatum<input type="text" placeholder="dd/mm/jjjj" value={followUp} onChange={(e) => setFollowUp(e.target.value)} /></label>

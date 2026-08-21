@@ -27,6 +27,7 @@ const DossierEventModal = ({ dossierId, dossierCompanyId, currentStatus = 'Lopen
   const [error, setError] = useState<string | null>(null)
 
   const editing = !!initialEvent?.id
+  const selectableContactPersons = contactPersons.filter((contact) => contact.is_active || contact.id === contactPersonId)
 
   // populate fields when editing an existing event (useEffect to avoid setState during render)
   useEffect(() => {
@@ -193,7 +194,7 @@ const DossierEventModal = ({ dossierId, dossierCompanyId, currentStatus = 'Lopen
             Contactpersoon
             <select value={contactPersonId} onChange={(e) => setContactPersonId(e.target.value)} disabled={!dossierCompanyId || !contactPersons.length}>
               <option value="">Geen contactpersoon</option>
-              {contactPersons.map((contact) => (
+              {selectableContactPersons.map((contact) => (
                 <option key={contact.id} value={contact.id}>{contact.name}</option>
               ))}
             </select>

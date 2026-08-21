@@ -89,6 +89,8 @@ def _with_relationships(conn: sqlite3.Connection, dossier: Dict[str, Any]) -> Di
 def _resolve_relationship(
     conn: sqlite3.Connection,
     payload: Dict[str, Any],
+    *,
+    allow_inactive_contact_id: Optional[str] = None,
 ) -> tuple[Optional[str], Optional[str], str, str]:
     company_id = payload.get("company_id") if "company_id" in payload else None
     contact_id = payload.get("primary_contact_person_id") if "primary_contact_person_id" in payload else None
@@ -99,11 +101,15 @@ def _resolve_relationship(
         customer = company[1]
         if contact_id is not None:
             contact = conn.execute(
-                "SELECT id, name FROM contact_persons WHERE id = ? AND company_id = ?",
-                (contact_id, company_id),
+                                """
+                                SELECT id, name FROM contact_persons
+                                WHERE id = ? AND company_id = ?
+                                    AND (is_active = 1 OR id = ?)
+                                """,
+                                (contact_id, company_id, allow_inactive_contact_id),
             ).fetchone()
             if contact is None:
-                raise ValueError("Primary contact person does not belong to the company")
+                raise ValueError("Primary contact person must be active and belong to the company")
             legacy_contact = contact[1]
         else:
             legacy_contact = ""
@@ -117,6 +123,8 @@ def _validate_event_contact(
     conn: sqlite3.Connection,
     dossier_id: str,
     contact_id: Optional[str],
+    *,
+    active_only: bool = False,
 ) -> None:
     if contact_id is None:
         return
@@ -126,10 +134,13 @@ def _validate_event_contact(
         FROM dossiers d
         JOIN contact_persons p ON p.company_id = d.company_id
         WHERE d.id = ? AND p.id = ?
+          AND (? = 0 OR p.is_active = 1)
         """,
-        (dossier_id, contact_id),
+        (dossier_id, contact_id, int(active_only)),
     ).fetchone()
     if row is None:
+        if active_only:
+            raise ValueError("Event contact person must be active and belong to the dossier's company")
         raise ValueError("Event contact person does not belong to the dossier's company")
 
 
@@ -217,7 +228,16 @@ def update(dossier_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]
         cur = conn.execute("SELECT id FROM dossiers WHERE id = ?", (dossier_id,))
         if cur.fetchone() is None:
             return None
-        company_id, primary_contact_id, customer, contact = _resolve_relationship(conn, payload)
+        existing_dossier = conn.execute(
+            "SELECT primary_contact_person_id FROM dossiers WHERE id = ?",
+            (dossier_id,),
+        ).fetchone()
+        existing_primary_id = existing_dossier[0] if existing_dossier else None
+        company_id, primary_contact_id, customer, contact = _resolve_relationship(
+            conn,
+            payload,
+            allow_inactive_contact_id=existing_primary_id,
+        )
         params = {
             "id": dossier_id,
             "customer": customer,
@@ -272,7 +292,7 @@ def add_event(dossier_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, An
         cur = conn.execute("SELECT id FROM dossiers WHERE id = ?", (dossier_id,))
         if cur.fetchone() is None:
             return None
-        _validate_event_contact(conn, dossier_id, params["contact_person_id"])
+        _validate_event_contact(conn, dossier_id, params["contact_person_id"], active_only=True)
         conn.execute(
             """
             INSERT INTO dossier_events (

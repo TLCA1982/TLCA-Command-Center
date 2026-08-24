@@ -173,7 +173,7 @@ def _contact_payload(payload: Dict[str, Any], *, existing: Optional[Dict[str, An
     if not name:
         raise ValueError("Contact person name is required")
     values = {"name": name, "normalized_name": normalize(name)}
-    for field in ("email", "phone", "job_title"):
+    for field in ("email", "phone", "mobile_phone", "job_title"):
         values[field] = str(payload.get(field, existing.get(field, "") if existing else "") or "").strip()
     values["is_active"] = _as_bool(payload.get("is_active", existing.get("is_active", True) if existing else True), "is_active")
     values["is_primary"] = _as_bool(payload.get("is_primary", existing.get("is_primary", False) if existing else False), "is_primary")
@@ -261,6 +261,145 @@ def reconcile_outlook_contacts(outlook_contacts: list[Dict[str, Any]]) -> Dict[s
             else:
                 unmatched.append({"outlook_contact_id": outlook_id, "display_name": outlook.get("displayName", "")})
         return {"linked": linked, "ambiguous": ambiguous, "unmatched": unmatched}
+
+
+def import_outlook_business_contacts(outlook_contacts: list[Dict[str, Any]]) -> Dict[str, Any]:
+    """Link safe matches and import unmatched business contacts in one transaction."""
+    allowed_categories = {category.casefold() for category in get_settings().outlook_business_category_list}
+    filtered_contacts = [
+        contact for contact in outlook_contacts
+        if contact.get("id") and {
+            category.casefold() for category in contact.get("categories", []) if isinstance(category, str)
+        }.intersection(allowed_categories)
+    ]
+    now = datetime.utcnow().isoformat()
+    backup_path = _backup_database()
+    connection = sqlite3.connect(str(DB_PATH), isolation_level=None)
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        local_cursor = connection.execute(
+            """
+            SELECT p.id, p.name, p.email, p.phone, p.mobile_phone, p.outlook_contact_id, c.name AS company_name
+            FROM contact_persons p JOIN companies c ON c.id = p.company_id
+            """
+        )
+        local_rows = local_cursor.fetchall()
+        columns = [column[0] for column in local_cursor.description]
+        local = [dict(zip(columns, row)) for row in local_rows]
+        existing_links = {row["outlook_contact_id"]: row["id"] for row in local if row["outlook_contact_id"]}
+        unlinked = [row for row in local if not row["outlook_contact_id"]]
+        linked_preserved = len(existing_links)
+        linked_local = 0
+        imported_contacts = 0
+        reused_companies = 0
+        new_companies = 0
+        ambiguous = []
+        insufficient_company = []
+        duplicate_conflicts = []
+        used_outlook_ids = set(existing_links)
+        ambiguous_outlook_ids = {
+            outlook["id"]
+            for outlook in filtered_contacts
+            if outlook.get("displayName")
+            and normalize(outlook.get("companyName"))
+            and sum(
+                1
+                for candidate in filtered_contacts
+                if normalize(candidate.get("displayName")) == normalize(outlook.get("displayName"))
+                and normalize(candidate.get("companyName")) == normalize(outlook.get("companyName"))
+            ) > 1
+        }
+
+        def outlook_email(contact: Dict[str, Any]) -> str:
+            return next((item.get("address", "") for item in contact.get("emailAddresses", []) if item.get("address")), "")
+
+        def outlook_phone(contact: Dict[str, Any]) -> str:
+            return next((value for value in contact.get("businessPhones", []) if value), "")
+
+        def outlook_mobile_phone(contact: Dict[str, Any]) -> str:
+            return contact.get("mobilePhone") or ""
+
+        def contact_candidates(contact: Dict[str, Any]) -> list[Dict[str, Any]]:
+            name = normalize(contact.get("displayName") or " ".join(filter(None, [contact.get("givenName"), contact.get("surname")])) )
+            email = normalize(outlook_email(contact))
+            phone = normalize_phone(outlook_phone(contact))
+            company = normalize(contact.get("companyName"))
+            matches = []
+            for row in unlinked:
+                signals = []
+                if email and email == normalize(row.get("email")):
+                    signals.append("exact normalized email")
+                if phone and phone == normalize_phone(row.get("phone")):
+                    signals.append("exact normalized phone")
+                if name and name == normalize(row.get("name")):
+                    signals.append("exact normalized name")
+                if name and company and name == normalize(row.get("name")) and company == normalize(row.get("company_name")):
+                    signals.append("exact name + company")
+                if signals:
+                    matches.append((row, signals))
+            return matches
+
+        for outlook in filtered_contacts:
+            outlook_id = outlook["id"]
+            if outlook_id in used_outlook_ids:
+                duplicate_conflicts.append({"outlook_contact_id": outlook_id, "reason": "already linked"})
+                continue
+            if outlook_id in ambiguous_outlook_ids:
+                ambiguous.append({"outlook_contact_id": outlook_id, "reason": "multiple Outlook contacts share the same name and company"})
+                continue
+            matches = contact_candidates(outlook)
+            if len(matches) > 1:
+                ambiguous.append({"outlook_contact_id": outlook_id, "reason": "multiple safe local matches"})
+                continue
+            if len(matches) == 1:
+                row, _ = matches[0]
+                connection.execute("UPDATE contact_persons SET outlook_contact_id = ? WHERE id = ? AND outlook_contact_id IS NULL", (outlook_id, row["id"]))
+                linked_local += 1
+                used_outlook_ids.add(outlook_id)
+                unlinked = [item for item in unlinked if item["id"] != row["id"]]
+                continue
+
+            company_name = str(outlook.get("companyName") or "").strip()
+            company_key = normalize(company_name) if company_name else normalize("Geen bedrijf")
+            company = connection.execute("SELECT id, name FROM companies WHERE normalized_name = ?", (company_key,)).fetchone()
+            if company is None:
+                company_id = str(uuid.uuid4())
+                display_company = company_name or "Geen bedrijf"
+                connection.execute("INSERT INTO companies (id, name, normalized_name, relationship_type, street, house_number, postal_code, city, country, created_at, updated_at) VALUES (?, ?, ?, NULL, '', '', '', '', '', ?, ?)", (company_id, display_company, company_key, now, now))
+                new_companies += 1
+            else:
+                company_id = company["id"]
+                reused_companies += 1
+            name = str(outlook.get("displayName") or " ".join(filter(None, [outlook.get("givenName"), outlook.get("surname")])) or "").strip()
+            if not name:
+                name = "Onbekend contact"
+            connection.execute("INSERT INTO contact_persons (id, company_id, name, normalized_name, email, phone, mobile_phone, job_title, is_active, is_primary, created_at, updated_at, outlook_contact_id) VALUES (?, ?, ?, ?, ?, ?, ?, '', 1, 0, ?, ?, ?)", (str(uuid.uuid4()), company_id, name, normalize(name), outlook_email(outlook).strip(), outlook_phone(outlook).strip(), outlook_mobile_phone(outlook).strip(), now, now, outlook_id))
+            imported_contacts += 1
+            used_outlook_ids.add(outlook_id)
+
+        duplicate_count = connection.execute("SELECT COUNT(*) FROM (SELECT outlook_contact_id FROM contact_persons WHERE outlook_contact_id IS NOT NULL GROUP BY outlook_contact_id HAVING COUNT(*) > 1)").fetchone()[0]
+        if duplicate_count:
+            raise RuntimeError("Import aborted: duplicate Outlook IDs detected")
+        connection.commit()
+        return {
+            "status": "completed", "backup_filename": backup_path.name,
+            "business_outlook_contacts_processed": len(filtered_contacts),
+            "existing_linked_contacts_preserved": linked_preserved,
+            "existing_local_contacts_newly_linked": linked_local,
+            "new_local_contacts_imported": imported_contacts,
+            "existing_companies_reused": reused_companies,
+            "new_companies_created": new_companies,
+            "ambiguous_contacts_skipped": len(ambiguous),
+            "contacts_skipped_because_company_data_is_insufficient": len(insufficient_company),
+            "duplicate_outlook_id_conflicts": len(duplicate_conflicts),
+            "remaining_local_only_contacts": connection.execute("SELECT COUNT(*) FROM contact_persons WHERE outlook_contact_id IS NULL").fetchone()[0],
+        }
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 
 def preview_outlook_reconciliation(outlook_contacts: list[Dict[str, Any]]) -> Dict[str, Any]:
@@ -533,7 +672,7 @@ def compare_linked_outlook_contacts(outlook_contacts: list[Dict[str, Any]]) -> D
     with _get_conn() as conn:
         local_rows = conn.execute(
             """
-            SELECT p.id, p.outlook_contact_id, p.name, p.email, p.phone, c.name AS company_name
+            SELECT p.id, p.outlook_contact_id, p.name, p.email, p.phone, p.mobile_phone, c.name AS company_name
             FROM contact_persons p
             JOIN companies c ON c.id = p.company_id
             WHERE p.outlook_contact_id IS NOT NULL
@@ -550,6 +689,9 @@ def compare_linked_outlook_contacts(outlook_contacts: list[Dict[str, Any]]) -> D
     def outlook_phone(contact: Dict[str, Any]) -> str:
         return next((value for value in contact.get("businessPhones", []) if value), "")
 
+    def outlook_mobile_phone(contact: Dict[str, Any]) -> str:
+        return contact.get("mobilePhone") or ""
+
     comparisons: list[Dict[str, Any]] = []
     summary = {
         "total_linked": len(local_rows),
@@ -562,6 +704,7 @@ def compare_linked_outlook_contacts(outlook_contacts: list[Dict[str, Any]]) -> D
         "company_differences": 0,
         "email_differences": 0,
         "phone_differences": 0,
+        "mobile_phone_differences": 0,
     }
     for row in local_rows:
         local = {key: row[key] for key in row.keys()}
@@ -596,14 +739,17 @@ def compare_linked_outlook_contacts(outlook_contacts: list[Dict[str, Any]]) -> D
             "company": (row["company_name"], outlook.get("companyName", "")),
             "email": (row["email"], outlook_email(outlook)),
             "phone": (row["phone"], outlook_phone(outlook)),
+            "mobile_phone": (row["mobile_phone"], outlook_mobile_phone(outlook)),
         }
         differences = [
             field
             for field, (local_value, outlook_value) in values.items()
-            if field != "phone" and normalize(local_value) != normalize(outlook_value)
+            if field not in ("phone", "mobile_phone") and normalize(local_value) != normalize(outlook_value)
         ]
         if normalize_phone(values["phone"][0]) != normalize_phone(values["phone"][1]):
             differences.append("phone")
+        if normalize_phone(values["mobile_phone"][0]) != normalize_phone(values["mobile_phone"][1]):
+            differences.append("mobile_phone")
         if status == "linked_ok":
             if differences:
                 summary["different"] += 1
@@ -622,6 +768,8 @@ def compare_linked_outlook_contacts(outlook_contacts: list[Dict[str, Any]]) -> D
             "outlook_email": values["email"][1],
             "local_phone": row["phone"],
             "outlook_phone": values["phone"][1],
+            "local_mobile_phone": row["mobile_phone"],
+            "outlook_mobile_phone": values["mobile_phone"][1],
             "outlook_categories": categories,
             "differences": differences,
             "status": status,
@@ -638,6 +786,7 @@ def build_linked_sync_plan(comparisons: list[Dict[str, Any]]) -> Dict[str, Any]:
         "company_to_outlook": 0, "company_to_command_center": 0,
         "email_to_outlook": 0, "email_to_command_center": 0,
         "phone_to_outlook": 0, "phone_to_command_center": 0,
+        "mobile_phone_to_outlook": 0, "mobile_phone_to_command_center": 0,
     }
     for contact in comparisons:
         if contact.get("status") != "linked_ok":
@@ -648,7 +797,7 @@ def build_linked_sync_plan(comparisons: list[Dict[str, Any]]) -> Dict[str, Any]:
         outlook_id = contact["outlook_contact_id"]
         if not local_id or not outlook_id:
             raise LinkedContactSyncError("Cannot synchronize a linked contact with a missing ID")
-        for field, normalizer in (("name", normalize), ("company", normalize), ("email", normalize), ("phone", normalize_phone)):
+        for field, normalizer in (("name", normalize), ("company", normalize), ("email", normalize), ("phone", normalize_phone), ("mobile_phone", normalize_phone)):
             local_value = contact.get(f"local_{field}") or ""
             outlook_value = contact.get(f"outlook_{field}") or ""
             local_normalized = normalizer(local_value)
@@ -678,6 +827,8 @@ def _outlook_patch(fields: Dict[str, str]) -> Dict[str, Any]:
             patch["emailAddresses"] = [{"address": value}]
         elif field == "phone":
             patch["businessPhones"] = [value]
+        elif field == "mobile_phone":
+            patch["mobilePhone"] = value
     return patch
 
 
@@ -778,6 +929,7 @@ async def synchronize_linked_outlook_contacts(graph_client: Any) -> Dict[str, An
                     "companyName": original.get("outlook_company", ""),
                     "emailAddresses": ([{"address": original["outlook_email"]}] if original.get("outlook_email") else []),
                     "businessPhones": ([original["outlook_phone"]] if original.get("outlook_phone") else []),
+                    "mobilePhone": original.get("outlook_mobile_phone") or "",
                 })
             except Exception:
                 compensation_complete = False
@@ -825,16 +977,18 @@ async def synchronize_updated_contact_to_outlook(contact: Dict[str, Any]) -> Dic
             "company": company.get("name", "") if company else "",
             "email": contact.get("email") or "",
             "phone": contact.get("phone") or "",
+            "mobile_phone": contact.get("mobile_phone") or "",
         }
         outlook_values = {
             "name": outlook.get("displayName") or " ".join(filter(None, [outlook.get("givenName"), outlook.get("surname")])),
             "company": outlook.get("companyName") or "",
             "email": next((item.get("address", "") for item in outlook.get("emailAddresses", []) if item.get("address")), ""),
             "phone": next((value for value in outlook.get("businessPhones", []) if value), ""),
+            "mobile_phone": outlook.get("mobilePhone") or "",
         }
         changed_fields = {
             field: values[field]
-            for field, normalizer in (("name", normalize), ("company", normalize), ("email", normalize), ("phone", normalize_phone))
+            for field, normalizer in (("name", normalize), ("company", normalize), ("email", normalize), ("phone", normalize_phone), ("mobile_phone", normalize_phone))
             if values[field] and normalizer(values[field]) != normalizer(outlook_values[field])
         }
         if not changed_fields:
@@ -881,8 +1035,8 @@ def create_contact(company_id: str, payload: Dict[str, Any]) -> Optional[Dict[st
         has_outlook_id = _has_outlook_contact_id(conn)
         if add_to_outlook and not has_outlook_id:
             raise ValueError("Outlook contact creation requires the pending contact Outlook ID migration")
-        columns = "id, company_id, name, normalized_name, email, phone, job_title, is_active, is_primary, created_at, updated_at"
-        placeholders = ":id, :company_id, :name, :normalized_name, :email, :phone, :job_title, :is_active, :is_primary, :created_at, :updated_at"
+        columns = "id, company_id, name, normalized_name, email, phone, mobile_phone, job_title, is_active, is_primary, created_at, updated_at"
+        placeholders = ":id, :company_id, :name, :normalized_name, :email, :phone, :mobile_phone, :job_title, :is_active, :is_primary, :created_at, :updated_at"
         if has_outlook_id:
             columns += ", outlook_contact_id"
             placeholders += ", :outlook_contact_id"
@@ -903,6 +1057,7 @@ def create_contact(company_id: str, payload: Dict[str, Any]) -> Optional[Dict[st
             "jobTitle": saved_contact["job_title"],
             "emailAddresses": ([{"address": saved_contact["email"]}] if saved_contact["email"] else []),
             "businessPhones": ([saved_contact["phone"]] if saved_contact["phone"] else []),
+            "mobilePhone": saved_contact["mobile_phone"] or "",
         }
         try:
             outlook_contact = MicrosoftGraphClient().create_contact(outlook_payload)
@@ -948,6 +1103,7 @@ def update_contact(company_id: str, contact_id: str, payload: Dict[str, Any]) ->
                 normalized_name = :normalized_name,
                 email = :email,
                 phone = :phone,
+                mobile_phone = :mobile_phone,
                 job_title = :job_title,
                 is_active = :is_active,
                 is_primary = :is_primary,

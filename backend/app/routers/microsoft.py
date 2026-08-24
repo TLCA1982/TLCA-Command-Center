@@ -75,6 +75,20 @@ async def reconcile_contacts() -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/contacts/reconcile/import")
+async def import_contacts() -> dict:
+    try:
+        client = MicrosoftGraphClient()
+        contacts = await client.get_contacts_for_categories(client.settings.outlook_business_category_list)
+        return company_service.import_outlook_business_contacts(contacts)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail="Microsoft Graph contact read failed during import.") from exc
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail="Microsoft Graph could not be reached during import.") from exc
+
+
 @router.get("/contacts/reconcile/preview/results")
 async def preview_reconciliation_results() -> dict:
     try:

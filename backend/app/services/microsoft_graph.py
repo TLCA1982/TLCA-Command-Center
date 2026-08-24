@@ -135,7 +135,7 @@ class MicrosoftGraphClient:
         token = self.get_access_token()
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         contacts: list[dict[str, Any]] = []
-        next_url: str | None = "https://graph.microsoft.com/v1.0/me/contacts?$select=id,displayName,givenName,surname,companyName,jobTitle,emailAddresses,businessPhones,categories"
+        next_url: str | None = "https://graph.microsoft.com/v1.0/me/contacts?$select=id,displayName,givenName,surname,companyName,jobTitle,emailAddresses,businessPhones,mobilePhone,categories"
         async with httpx.AsyncClient(timeout=20.0) as client:
             while next_url:
                 response = await client.get(next_url, headers=headers)
@@ -150,7 +150,7 @@ class MicrosoftGraphClient:
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         url = (
             "https://graph.microsoft.com/v1.0/me/contacts/"
-            f"{contact_id}?$select=id,displayName,givenName,surname,companyName,emailAddresses,businessPhones,categories"
+            f"{contact_id}?$select=id,displayName,givenName,surname,companyName,emailAddresses,businessPhones,mobilePhone,categories"
         )
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.get(url, headers=headers)
@@ -178,7 +178,7 @@ class MicrosoftGraphClient:
                 escaped = category.replace("'", "''")
                 next_url: str | None = (
                     "https://graph.microsoft.com/v1.0/me/contacts"
-                    "?$select=id,displayName,givenName,surname,companyName,jobTitle,emailAddresses,businessPhones,categories"
+                    "?$select=id,displayName,givenName,surname,companyName,jobTitle,emailAddresses,businessPhones,mobilePhone,categories"
                     f"&$filter=categories/any(c:c%20eq%20'{escaped}')"
                 )
                 while next_url:

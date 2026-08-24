@@ -15,6 +15,7 @@ const ContactSummary = ({ contact }: { contact: any }) => (
     {contact.job_title && <span>{contact.job_title}</span>}
     {contact.email && <span>{contact.email}</span>}
     {contact.phone && <span>{contact.phone}</span>}
+    {contact.mobile_phone && <span>{contact.mobile_phone}</span>}
   </div>
 )
 

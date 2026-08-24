@@ -21,6 +21,7 @@ const ContactPersonModal = ({ companyId, contact, allowOutlook = false, onClose,
     name: contact?.name ?? '',
     email: contact?.email ?? '',
     phone: contact?.phone ?? '',
+    mobile_phone: contact?.mobile_phone ?? '',
     job_title: contact?.job_title ?? '',
     is_active: toBoolean(contact?.is_active, true),
     is_primary: toBoolean(contact?.is_primary, false),
@@ -64,6 +65,7 @@ const ContactPersonModal = ({ companyId, contact, allowOutlook = false, onClose,
         <label>Functie<input value={fields.job_title} onChange={(e) => setField('job_title', e.target.value)} /></label>
         <label>E-mail<input type="email" value={fields.email} onChange={(e) => setField('email', e.target.value)} /></label>
         <label>Telefoon<input value={fields.phone} onChange={(e) => setField('phone', e.target.value)} /></label>
+        <label>Mobiel<input value={fields.mobile_phone} onChange={(e) => setField('mobile_phone', e.target.value)} /></label>
         <label className="checkbox-field"><input type="checkbox" checked={fields.is_active} onChange={(e) => setFields((current) => ({ ...current, is_active: e.target.checked, is_primary: e.target.checked && current.is_primary }))} />Actief</label>
         <label className="checkbox-field"><input type="checkbox" checked={fields.is_primary} disabled={!fields.is_active} onChange={(e) => setField('is_primary', e.target.checked)} />Primair contact</label>
         {allowOutlook && !contact && <label className="checkbox-field"><input type="checkbox" checked={addToOutlook} onChange={(e) => setAddToOutlook(e.target.checked)} />Ook toevoegen aan Outlook</label>}

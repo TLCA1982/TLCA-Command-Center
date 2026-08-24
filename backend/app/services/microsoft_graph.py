@@ -144,6 +144,20 @@ class MicrosoftGraphClient:
                 next_url = payload.get("@odata.nextLink")
         return contacts
 
+    async def get_contact_by_id(self, contact_id: str) -> dict[str, Any] | None:
+        token = self.get_access_token()
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        url = (
+            "https://graph.microsoft.com/v1.0/me/contacts/"
+            f"{contact_id}?$select=id,displayName,givenName,surname,companyName,emailAddresses,businessPhones,categories"
+        )
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(url, headers=headers)
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return response.json()
+
     async def get_contacts_for_categories(self, categories: list[str]) -> list[dict[str, Any]]:
         token = self.get_access_token()
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}

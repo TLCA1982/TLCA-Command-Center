@@ -75,6 +75,58 @@ async def reconcile_contacts() -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/contacts/reconcile/preview/results")
+async def preview_reconciliation_results() -> dict:
+    try:
+        client = MicrosoftGraphClient()
+        configured = client.settings.outlook_business_category_list
+        outlook_contacts = await client.get_contacts_for_categories(configured)
+        return {"configured_categories": configured, **company_service.preview_outlook_reconciliation(outlook_contacts)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        graph_status = exc.response.status_code
+        raise HTTPException(status_code=graph_status if 400 <= graph_status < 500 else 502, detail=f"Microsoft Graph returned HTTP {graph_status} while reading Outlook contacts.") from exc
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail="Microsoft Graph could not be reached while reading Outlook contacts.") from exc
+
+
+@router.get("/contacts/reconcile/preview/candidates")
+async def preview_reconciliation_candidates() -> dict:
+    try:
+        client = MicrosoftGraphClient()
+        configured = client.settings.outlook_business_category_list
+        outlook_contacts = await client.get_contacts_for_categories(configured)
+        return {"configured_categories": configured, **company_service.preview_outlook_candidates(outlook_contacts)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        graph_status = exc.response.status_code
+        raise HTTPException(status_code=graph_status if 400 <= graph_status < 500 else 502, detail=f"Microsoft Graph returned HTTP {graph_status} while reading Outlook contacts.") from exc
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail="Microsoft Graph could not be reached while reading Outlook contacts.") from exc
+
+
+@router.get("/contacts/reconcile/preview/linked")
+async def preview_linked_contacts() -> dict:
+    try:
+        client = MicrosoftGraphClient()
+        linked_ids = company_service.get_linked_outlook_ids()
+        outlook_contacts = []
+        for contact_id in linked_ids:
+            contact = await client.get_contact_by_id(contact_id)
+            if contact is not None:
+                outlook_contacts.append(contact)
+        return {"configured_categories": client.settings.outlook_business_category_list, **company_service.compare_linked_outlook_contacts(outlook_contacts)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        graph_status = exc.response.status_code
+        raise HTTPException(status_code=graph_status if 400 <= graph_status < 500 else 502, detail=f"Microsoft Graph returned HTTP {graph_status} while reading linked Outlook contacts.") from exc
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail="Microsoft Graph could not be reached while reading linked Outlook contacts.") from exc
+
+
 @router.get("/contacts/reconcile/preview")
 async def preview_contact_reconciliation() -> dict:
     return {"configured_categories": get_settings().outlook_business_category_list}

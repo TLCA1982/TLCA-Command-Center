@@ -4,6 +4,7 @@ import base64
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import msal
@@ -161,7 +162,7 @@ class MicrosoftGraphClient:
     async def update_contact(self, contact_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         token = self.get_access_token()
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/json"}
-        url = f"https://graph.microsoft.com/v1.0/me/contacts/{contact_id}"
+        url = f"https://graph.microsoft.com/v1.0/me/contacts/{quote(contact_id, safe='')}"
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.patch(url, headers=headers, json=payload)
             response.raise_for_status()

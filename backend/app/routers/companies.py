@@ -74,7 +74,8 @@ async def update_contact(company_id: str, contact_id: str, payload: dict[str, An
         raise _bad_request(exc) from exc
     if contact is None:
         raise HTTPException(status_code=404, detail="Contact person not found for this company")
-    return contact
+    outlook_sync = await company_service.synchronize_updated_contact_to_outlook(contact)
+    return {**contact, "outlook_sync": outlook_sync}
 
 
 @router.delete("/{company_id}/contacts/{contact_id}")

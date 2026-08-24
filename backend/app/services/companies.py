@@ -646,6 +646,8 @@ def build_linked_sync_plan(comparisons: list[Dict[str, Any]]) -> Dict[str, Any]:
             )
         local_id = contact["local_contact_id"]
         outlook_id = contact["outlook_contact_id"]
+        if not local_id or not outlook_id:
+            raise LinkedContactSyncError("Cannot synchronize a linked contact with a missing ID")
         for field, normalizer in (("name", normalize), ("company", normalize), ("email", normalize), ("phone", normalize_phone)):
             local_value = contact.get(f"local_{field}") or ""
             outlook_value = contact.get(f"outlook_{field}") or ""
@@ -707,6 +709,12 @@ async def synchronize_linked_outlook_contacts(graph_client: Any) -> Dict[str, An
     contacts = comparison["contacts"]
     if len(contacts) != len(linked_ids):
         raise LinkedContactSyncError("Synchronization aborted: one or more linked Outlook contacts is missing")
+    preview_links = {
+        contact["local_contact_id"]: contact["outlook_contact_id"]
+        for contact in contacts
+    }
+    if len(preview_links) != len(linked_ids) or set(preview_links.values()) != set(linked_ids):
+        raise LinkedContactSyncError("Synchronization aborted: linked Outlook ID mapping is incomplete or inconsistent")
     plan = build_linked_sync_plan(contacts)
     outlook_originals = {contact["outlook_contact_id"]: contact for contact in contacts}
     graph_changed: list[str] = []
@@ -787,6 +795,54 @@ async def synchronize_linked_outlook_contacts(graph_client: Any) -> Dict[str, An
         "command_center_contacts_updated": len(plan["local_updates"]),
         "field_updates": plan["field_counts"],
     }
+
+
+async def synchronize_updated_contact_to_outlook(contact: Dict[str, Any]) -> Dict[str, Any]:
+    """Push one saved linked contact to Outlook without affecting local persistence."""
+    outlook_id = contact.get("outlook_contact_id")
+    if not outlook_id:
+        return {"status": "not_required", "reason": "contact is not linked to Outlook"}
+
+    try:
+        outlook = await MicrosoftGraphClient().get_contact_by_id(outlook_id)
+        if outlook is None:
+            return {"status": "failed", "reason": "linked Outlook contact was not found"}
+        categories = {
+            category.casefold()
+            for category in outlook.get("categories", [])
+            if isinstance(category, str)
+        }
+        allowed_categories = {
+            category.casefold()
+            for category in get_settings().outlook_business_category_list
+        }
+        if not categories.intersection(allowed_categories):
+            return {"status": "failed", "reason": "linked Outlook contact category is no longer allowed"}
+
+        company = get_by_id(contact["company_id"])
+        values = {
+            "name": contact.get("name") or "",
+            "company": company.get("name", "") if company else "",
+            "email": contact.get("email") or "",
+            "phone": contact.get("phone") or "",
+        }
+        outlook_values = {
+            "name": outlook.get("displayName") or " ".join(filter(None, [outlook.get("givenName"), outlook.get("surname")])),
+            "company": outlook.get("companyName") or "",
+            "email": next((item.get("address", "") for item in outlook.get("emailAddresses", []) if item.get("address")), ""),
+            "phone": next((value for value in outlook.get("businessPhones", []) if value), ""),
+        }
+        changed_fields = {
+            field: values[field]
+            for field, normalizer in (("name", normalize), ("company", normalize), ("email", normalize), ("phone", normalize_phone))
+            if values[field] and normalizer(values[field]) != normalizer(outlook_values[field])
+        }
+        if not changed_fields:
+            return {"status": "identical", "patched_fields": []}
+        await MicrosoftGraphClient().update_contact(outlook_id, _outlook_patch(changed_fields))
+        return {"status": "completed", "patched_fields": sorted(changed_fields)}
+    except Exception as exc:
+        return {"status": "failed", "reason": f"local contact saved but Outlook synchronization failed: {exc}"}
 
 
 def get_contacts(company_id: str) -> Optional[List[Dict[str, Any]]]:

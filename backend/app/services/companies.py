@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import shutil
 from difflib import SequenceMatcher
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,12 @@ class OutlookContactCreationError(ValueError):
     def __init__(self, contact: Dict[str, Any], reason: str) -> None:
         super().__init__(reason)
         self.contact = contact
+
+
+class LinkedContactSyncError(ValueError):
+    def __init__(self, message: str, *, compensation_complete: bool = True) -> None:
+        super().__init__(message)
+        self.compensation_complete = compensation_complete
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -620,6 +627,166 @@ def compare_linked_outlook_contacts(outlook_contacts: list[Dict[str, Any]]) -> D
             "status": status,
         })
     return {"summary": summary, "contacts": comparisons}
+
+
+def build_linked_sync_plan(comparisons: list[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build a dynamic Command Center-authoritative plan from linked comparisons."""
+    outlook_updates: Dict[str, Dict[str, str]] = {}
+    local_updates: Dict[str, Dict[str, str]] = {}
+    field_counts = {
+        "name_to_outlook": 0, "name_to_command_center": 0,
+        "company_to_outlook": 0, "company_to_command_center": 0,
+        "email_to_outlook": 0, "email_to_command_center": 0,
+        "phone_to_outlook": 0, "phone_to_command_center": 0,
+    }
+    for contact in comparisons:
+        if contact.get("status") != "linked_ok":
+            raise LinkedContactSyncError(
+                f"Cannot synchronize linked contacts with status {contact.get('status')}"
+            )
+        local_id = contact["local_contact_id"]
+        outlook_id = contact["outlook_contact_id"]
+        for field, normalizer in (("name", normalize), ("company", normalize), ("email", normalize), ("phone", normalize_phone)):
+            local_value = contact.get(f"local_{field}") or ""
+            outlook_value = contact.get(f"outlook_{field}") or ""
+            local_normalized = normalizer(local_value)
+            outlook_normalized = normalizer(outlook_value)
+            if local_normalized and local_normalized != outlook_normalized:
+                outlook_updates.setdefault(outlook_id, {})[field] = local_value
+                field_counts[f"{field}_to_outlook"] += 1
+            elif not local_normalized and outlook_normalized:
+                local_updates.setdefault(local_id, {})[field] = outlook_value
+                field_counts[f"{field}_to_command_center"] += 1
+    return {
+        "linked_contacts": len(comparisons),
+        "outlook_updates": outlook_updates,
+        "local_updates": local_updates,
+        "field_counts": field_counts,
+    }
+
+
+def _outlook_patch(fields: Dict[str, str]) -> Dict[str, Any]:
+    patch: Dict[str, Any] = {}
+    for field, value in fields.items():
+        if field == "name":
+            patch["displayName"] = value
+        elif field == "company":
+            patch["companyName"] = value
+        elif field == "email":
+            patch["emailAddresses"] = [{"address": value}]
+        elif field == "phone":
+            patch["businessPhones"] = [value]
+    return patch
+
+
+def _backup_database() -> Path:
+    backup_dir = DB_PATH.parents[1] / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = backup_dir / f"{DB_PATH.stem}_{timestamp}{DB_PATH.suffix}"
+    counter = 1
+    while backup_path.exists():
+        backup_path = backup_dir / f"{DB_PATH.stem}_{timestamp}_{counter}{DB_PATH.suffix}"
+        counter += 1
+    shutil.copy2(DB_PATH, backup_path)
+    return backup_path
+
+
+async def synchronize_linked_outlook_contacts(graph_client: Any) -> Dict[str, Any]:
+    """Synchronize all currently linked contacts with transactional local writes."""
+    backup_path = _backup_database()
+    linked_ids = get_linked_outlook_ids()
+    if len(linked_ids) != len(set(linked_ids)):
+        raise LinkedContactSyncError("Synchronization aborted: duplicate linked Outlook IDs detected")
+    outlook_contacts = []
+    for contact_id in linked_ids:
+        contact = await graph_client.get_contact_by_id(contact_id)
+        if contact is not None:
+            outlook_contacts.append(contact)
+    comparison = compare_linked_outlook_contacts(outlook_contacts)
+    contacts = comparison["contacts"]
+    if len(contacts) != len(linked_ids):
+        raise LinkedContactSyncError("Synchronization aborted: one or more linked Outlook contacts is missing")
+    plan = build_linked_sync_plan(contacts)
+    outlook_originals = {contact["outlook_contact_id"]: contact for contact in contacts}
+    graph_changed: list[str] = []
+    try:
+        for outlook_id, fields in plan["outlook_updates"].items():
+            await graph_client.update_contact(outlook_id, _outlook_patch(fields))
+            graph_changed.append(outlook_id)
+
+        connection = sqlite3.connect(str(DB_PATH), isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            for local_id, fields in plan["local_updates"].items():
+                contact_row = connection.execute(
+                    "SELECT company_id FROM contact_persons WHERE id = ? AND outlook_contact_id IS NOT NULL",
+                    (local_id,),
+                ).fetchone()
+                if contact_row is None:
+                    raise LinkedContactSyncError(f"Local contact {local_id} is no longer linked")
+                for field, value in fields.items():
+                    if field == "company":
+                        duplicate = connection.execute(
+                            "SELECT id FROM companies WHERE normalized_name = ? AND id != ?",
+                            (normalize(value), contact_row["company_id"]),
+                        ).fetchone()
+                        if duplicate is not None:
+                            raise LinkedContactSyncError(f"Company update for contact {local_id} would create a duplicate company")
+                        cursor = connection.execute(
+                            "UPDATE companies SET name = ?, normalized_name = ? WHERE id = ?",
+                            (value, normalize(value), contact_row["company_id"]),
+                        )
+                    else:
+                        cursor = connection.execute(
+                            f"UPDATE contact_persons SET {field} = ? WHERE id = ? AND outlook_contact_id IS NOT NULL",
+                            (value, local_id),
+                        )
+                    if cursor.rowcount != 1:
+                        raise LinkedContactSyncError(f"Local update failed for contact {local_id}")
+            links = {
+                row["id"]: row["outlook_contact_id"]
+                for row in connection.execute("SELECT id, outlook_contact_id FROM contact_persons WHERE outlook_contact_id IS NOT NULL")
+            }
+            expected_links = {contact["local_contact_id"]: contact["outlook_contact_id"] for contact in contacts}
+            if any(links.get(local_id) != outlook_id for local_id, outlook_id in expected_links.items()):
+                raise LinkedContactSyncError("Local link integrity validation failed")
+            if connection.execute("SELECT COUNT(*) FROM (SELECT outlook_contact_id FROM contact_persons WHERE outlook_contact_id IS NOT NULL GROUP BY outlook_contact_id HAVING COUNT(*) > 1)").fetchone()[0] != 0:
+                raise LinkedContactSyncError("Duplicate linked Outlook IDs detected")
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+    except Exception as exc:
+        compensation_complete = True
+        for outlook_id in graph_changed:
+            try:
+                original = outlook_originals[outlook_id]
+                await graph_client.update_contact(outlook_id, {
+                    "displayName": original.get("outlook_name", ""),
+                    "companyName": original.get("outlook_company", ""),
+                    "emailAddresses": ([{"address": original["outlook_email"]}] if original.get("outlook_email") else []),
+                    "businessPhones": ([original["outlook_phone"]] if original.get("outlook_phone") else []),
+                })
+            except Exception:
+                compensation_complete = False
+        if isinstance(exc, LinkedContactSyncError):
+            raise LinkedContactSyncError(str(exc), compensation_complete=compensation_complete) from exc
+        raise LinkedContactSyncError(
+            f"Linked contact synchronization failed; compensation_complete={compensation_complete}",
+            compensation_complete=compensation_complete,
+        ) from exc
+    return {
+        "status": "completed",
+        "backup_filename": backup_path.name,
+        "linked_contacts": plan["linked_contacts"],
+        "outlook_contacts_updated": len(plan["outlook_updates"]),
+        "command_center_contacts_updated": len(plan["local_updates"]),
+        "field_updates": plan["field_counts"],
+    }
 
 
 def get_contacts(company_id: str) -> Optional[List[Dict[str, Any]]]:

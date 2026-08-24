@@ -158,6 +158,15 @@ class MicrosoftGraphClient:
             response.raise_for_status()
             return response.json()
 
+    async def update_contact(self, contact_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        token = self.get_access_token()
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/json"}
+        url = f"https://graph.microsoft.com/v1.0/me/contacts/{contact_id}"
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.patch(url, headers=headers, json=payload)
+            response.raise_for_status()
+            return response.json() if response.content else {}
+
     async def get_contacts_for_categories(self, categories: list[str]) -> list[dict[str, Any]]:
         token = self.get_access_token()
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}

@@ -127,6 +127,21 @@ async def preview_linked_contacts() -> dict:
         raise HTTPException(status_code=502, detail="Microsoft Graph could not be reached while reading linked Outlook contacts.") from exc
 
 
+@router.post("/contacts/sync")
+async def sync_linked_contacts() -> dict:
+    try:
+        return await company_service.synchronize_linked_outlook_contacts(MicrosoftGraphClient())
+    except company_service.LinkedContactSyncError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"message": str(exc), "compensation_complete": exc.compensation_complete},
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail="Microsoft Graph update failed while synchronizing linked contacts.") from exc
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail="Microsoft Graph could not be reached while synchronizing linked contacts.") from exc
+
+
 @router.get("/contacts/reconcile/preview")
 async def preview_contact_reconciliation() -> dict:
     return {"configured_categories": get_settings().outlook_business_category_list}

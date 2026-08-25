@@ -33,7 +33,7 @@ def _row_to_dict(row: Any) -> Dict[str, Any]:
 
 def get(ms_id: str) -> Optional[Dict[str, Any]]:
     with _get_conn() as conn:
-        cur = conn.execute("SELECT * FROM microsoft_metadata WHERE ms_id = ?", (ms_id,))
+        cur = conn.execute("SELECT * FROM microsoft_metadata WHERE ms_id = :ms_id", {"ms_id": ms_id})
         row = cur.fetchone()
         return _row_to_dict(row) if row is not None else None
 
@@ -54,7 +54,7 @@ def upsert(ms_id: str, source: str | None = None, customer: str | None = None, c
         if existing is None:
             conn.execute(
                 """
-                INSERT INTO microsoft_metadata (ms_id, source, customer, contact, action_type, lastModifiedDate)
+                INSERT INTO microsoft_metadata (ms_id, source, customer, contact, action_type, "lastModifiedDate")
                 VALUES (:ms_id, :source, :customer, :contact, :action_type, :lastModifiedDate)
                 """,
                 params,
@@ -67,7 +67,7 @@ def upsert(ms_id: str, source: str | None = None, customer: str | None = None, c
                     customer = :customer,
                     contact = :contact,
                     action_type = :action_type,
-                    lastModifiedDate = :lastModifiedDate
+                    "lastModifiedDate" = :lastModifiedDate
                 WHERE ms_id = :ms_id
                 """,
                 params,
@@ -78,6 +78,6 @@ def upsert(ms_id: str, source: str | None = None, customer: str | None = None, c
 
 def get_all() -> List[Dict[str, Any]]:
     with _get_conn() as conn:
-        cur = conn.execute("SELECT * FROM microsoft_metadata ORDER BY lastModifiedDate DESC")
+        cur = conn.execute('SELECT * FROM microsoft_metadata ORDER BY "lastModifiedDate" DESC')
         rows = cur.fetchall()
     return [_row_to_dict(r) for r in rows]

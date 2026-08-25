@@ -8,7 +8,7 @@ from pathlib import Path
 import uuid
 from typing import Any, Dict, List, Optional
 
-from app.db import DB_PATH, get_conn, is_sqlite
+from app.db import DB_PATH, get_conn, has_column, is_sqlite
 from app.config import get_settings
 from app.services.microsoft_graph import MicrosoftGraphClient
 
@@ -78,13 +78,13 @@ def _company_payload(payload: Dict[str, Any], *, existing: Optional[Dict[str, An
 
 
 def _get_company(connection: sqlite3.Connection, company_id: str) -> Optional[Dict[str, Any]]:
-    row = connection.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
+    row = connection.execute("SELECT * FROM companies WHERE id = :id", {"id": company_id}).fetchone()
     return _row_to_dict(row) if row is not None else None
 
 
 def get_all() -> List[Dict[str, Any]]:
     with _get_conn() as conn:
-        rows = conn.execute("SELECT * FROM companies ORDER BY name COLLATE NOCASE").fetchall()
+        rows = conn.execute("SELECT * FROM companies ORDER BY LOWER(name)").fetchall()
     return [_row_to_dict(row) for row in rows]
 
 
@@ -104,8 +104,8 @@ def create(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
     with _get_conn() as conn:
         duplicate = conn.execute(
-            "SELECT id FROM companies WHERE normalized_name = ?",
-            (values["normalized_name"],),
+            "SELECT id FROM companies WHERE normalized_name = :normalized_name",
+            {"normalized_name": values["normalized_name"]},
         ).fetchone()
         if duplicate is not None:
             raise ValueError("A company with the same normalized name already exists")
@@ -132,8 +132,8 @@ def update(company_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]
             return None
         values = _company_payload(payload, existing=existing)
         duplicate = conn.execute(
-            "SELECT id FROM companies WHERE normalized_name = ? AND id != ?",
-            (values["normalized_name"], company_id),
+            "SELECT id FROM companies WHERE normalized_name = :normalized_name AND id != :id",
+            {"normalized_name": values["normalized_name"], "id": company_id},
         ).fetchone()
         if duplicate is not None:
             raise ValueError("A company with the same normalized name already exists")
@@ -181,14 +181,14 @@ def _contact_payload(payload: Dict[str, Any], *, existing: Optional[Dict[str, An
 
 def _get_contact(connection: sqlite3.Connection, company_id: str, contact_id: str) -> Optional[Dict[str, Any]]:
     row = connection.execute(
-        "SELECT * FROM contact_persons WHERE id = ? AND company_id = ?",
-        (contact_id, company_id),
+        "SELECT * FROM contact_persons WHERE id = :id AND company_id = :company_id",
+        {"id": contact_id, "company_id": company_id},
     ).fetchone()
     return _row_to_dict(row) if row is not None else None
 
 
 def _has_outlook_contact_id(connection: sqlite3.Connection) -> bool:
-    return "outlook_contact_id" in {row[1] for row in connection.execute("PRAGMA table_info(contact_persons)")}
+    return has_column(connection, "contact_persons", "outlook_contact_id")
 
 
 def get_linked_outlook_ids() -> List[str]:
@@ -200,7 +200,7 @@ def get_linked_outlook_ids() -> List[str]:
 
 
 def _has_outlook_contact_id(connection: sqlite3.Connection) -> bool:
-    return "outlook_contact_id" in {row[1] for row in connection.execute("PRAGMA table_info(contact_persons)")}
+    return has_column(connection, "contact_persons", "outlook_contact_id")
 
 
 def reconcile_outlook_contacts(outlook_contacts: list[Dict[str, Any]]) -> Dict[str, Any]:
@@ -250,7 +250,7 @@ def reconcile_outlook_contacts(outlook_contacts: list[Dict[str, Any]]) -> Dict[s
                     signal = "name_company"
             if len(matches) == 1:
                 contact = matches[0]
-                conn.execute("UPDATE contact_persons SET outlook_contact_id = ? WHERE id = ?", (outlook_id, contact["id"]))
+                conn.execute("UPDATE contact_persons SET outlook_contact_id = :outlook_id WHERE id = :id", {"outlook_id": outlook_id, "id": contact["id"]})
                 contact["outlook_contact_id"] = outlook_id
                 linked.append({"contact_person_id": contact["id"], "outlook_contact_id": outlook_id, "signal": signal})
             elif len(matches) > 1:
@@ -409,7 +409,7 @@ def preview_outlook_reconciliation(outlook_contacts: list[Dict[str, Any]]) -> Di
             SELECT p.id, p.name, p.email, p.phone, p.outlook_contact_id, c.name AS company_name
             FROM contact_persons p
             JOIN companies c ON c.id = p.company_id
-            ORDER BY p.name COLLATE NOCASE
+            ORDER BY LOWER(p.name)
             """
         ).fetchall()
 
@@ -523,7 +523,7 @@ def preview_outlook_candidates(outlook_contacts: list[Dict[str, Any]]) -> Dict[s
             FROM contact_persons p
             JOIN companies c ON c.id = p.company_id
             WHERE p.outlook_contact_id IS NULL
-            ORDER BY p.name COLLATE NOCASE
+            ORDER BY LOWER(p.name)
             """
         ).fetchall()
         linked_outlook_ids = {
@@ -675,7 +675,7 @@ def compare_linked_outlook_contacts(outlook_contacts: list[Dict[str, Any]]) -> D
             FROM contact_persons p
             JOIN companies c ON c.id = p.company_id
             WHERE p.outlook_contact_id IS NOT NULL
-            ORDER BY p.name COLLATE NOCASE
+            ORDER BY LOWER(p.name)
             """
         ).fetchall()
 
@@ -1005,8 +1005,8 @@ def get_contacts(company_id: str) -> Optional[List[Dict[str, Any]]]:
         if _get_company(conn, company_id) is None:
             return None
         rows = conn.execute(
-            "SELECT * FROM contact_persons WHERE company_id = ? ORDER BY name COLLATE NOCASE",
-            (company_id,),
+            "SELECT * FROM contact_persons WHERE company_id = :company_id ORDER BY LOWER(name)",
+            {"company_id": company_id},
         ).fetchall()
     return [_row_to_dict(row) for row in rows]
 
@@ -1026,13 +1026,13 @@ def create_contact(company_id: str, payload: Dict[str, Any]) -> Optional[Dict[st
         if _get_company(conn, company_id) is None:
             return None
         duplicate = conn.execute(
-            "SELECT id FROM contact_persons WHERE company_id = ? AND normalized_name = ?",
-            (company_id, values["normalized_name"]),
+            "SELECT id FROM contact_persons WHERE company_id = :company_id AND normalized_name = :normalized_name",
+            {"company_id": company_id, "normalized_name": values["normalized_name"]},
         ).fetchone()
         if duplicate is not None:
             raise ValueError("A contact person with the same normalized name already exists for this company")
         if values["is_primary"]:
-            conn.execute("UPDATE contact_persons SET is_primary = 0 WHERE company_id = ?", (company_id,))
+            conn.execute("UPDATE contact_persons SET is_primary = 0 WHERE company_id = :company_id", {"company_id": company_id})
         has_outlook_id = _has_outlook_contact_id(conn)
         if add_to_outlook and not has_outlook_id:
             raise ValueError("Outlook contact creation requires the pending contact Outlook ID migration")
@@ -1065,7 +1065,7 @@ def create_contact(company_id: str, payload: Dict[str, Any]) -> Optional[Dict[st
             outlook_id = outlook_contact.get("id")
             if not outlook_id:
                 raise ValueError("Microsoft Graph returned no Outlook contact ID")
-            conn.execute("UPDATE contact_persons SET outlook_contact_id = ? WHERE id = ?", (outlook_id, contact["id"]))
+            conn.execute("UPDATE contact_persons SET outlook_contact_id = :outlook_id WHERE id = :id", {"outlook_id": outlook_id, "id": contact["id"]})
             conn.commit()
             return _get_contact(conn, company_id, contact["id"]) or saved_contact
         except Exception as exc:
@@ -1085,17 +1085,17 @@ def update_contact(company_id: str, contact_id: str, payload: Dict[str, Any]) ->
         duplicate = conn.execute(
             """
             SELECT id FROM contact_persons
-            WHERE company_id = ? AND normalized_name = ? AND id != ?
+            WHERE company_id = :company_id AND normalized_name = :normalized_name AND id != :id
             """,
-            (company_id, values["normalized_name"], contact_id),
+            {"company_id": company_id, "normalized_name": values["normalized_name"], "id": contact_id},
         ).fetchone()
         if duplicate is not None:
             raise ValueError("A contact person with the same normalized name already exists for this company")
         values.update({"id": contact_id, "company_id": company_id, "updated_at": now})
         if values["is_primary"]:
             conn.execute(
-                "UPDATE contact_persons SET is_primary = 0 WHERE company_id = ? AND id != ?",
-                (company_id, contact_id),
+                "UPDATE contact_persons SET is_primary = 0 WHERE company_id = :company_id AND id != :id",
+                {"company_id": company_id, "id": contact_id},
             )
         conn.execute(
             """
@@ -1122,16 +1122,16 @@ def delete_contact(company_id: str, contact_id: str) -> bool:
         if contact is None:
             return False
         dossier_event = conn.execute(
-            "SELECT 1 FROM dossier_events WHERE contact_person_id = ? LIMIT 1",
-            (contact_id,),
+            "SELECT 1 FROM dossier_events WHERE contact_person_id = :contact_id LIMIT 1",
+            {"contact_id": contact_id},
         ).fetchone()
         if dossier_event is not None:
             raise ContactPersonInUseError(
                 "Contact person cannot be deleted because it is used in contact-moment history"
             )
         conn.execute(
-            "UPDATE dossiers SET primary_contact_person_id = NULL WHERE primary_contact_person_id = ?",
-            (contact_id,),
+            "UPDATE dossiers SET primary_contact_person_id = NULL WHERE primary_contact_person_id = :contact_id",
+            {"contact_id": contact_id},
         )
-        conn.execute("DELETE FROM contact_persons WHERE id = ? AND company_id = ?", (contact_id, company_id))
+        conn.execute("DELETE FROM contact_persons WHERE id = :id AND company_id = :company_id", {"id": contact_id, "company_id": company_id})
     return True

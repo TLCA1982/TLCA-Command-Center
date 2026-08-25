@@ -45,7 +45,7 @@ def _row_to_dict(row: Any) -> Dict[str, Any]:
 
 def get_all() -> List[Dict[str, Any]]:
     with _get_conn() as conn:
-        cur = conn.execute("SELECT * FROM manual_actions ORDER BY lastModifiedDate DESC")
+        cur = conn.execute('SELECT * FROM manual_actions ORDER BY "lastModifiedDate" DESC')
         rows = cur.fetchall()
     return [_row_to_dict(r) for r in rows]
 
@@ -76,8 +76,8 @@ def create(action: Dict[str, Any]) -> Dict[str, Any]:
         conn.execute(
             """
             INSERT INTO manual_actions (
-                id, title, customer, contact, type, priority, dueDate, status, notes,
-                createdDate, lastModifiedDate, source, adsolutCustomerId, visitReportId, communicatorId, quotationId
+                id, title, customer, contact, type, priority, "dueDate", status, notes,
+                "createdDate", "lastModifiedDate", source, "adsolutCustomerId", "visitReportId", "communicatorId", "quotationId"
             ) VALUES (
                 :id, :title, :customer, :contact, :type, :priority, :dueDate, :status, :notes,
                 :createdDate, :lastModifiedDate, :source, :adsolutCustomerId, :visitReportId, :communicatorId, :quotationId
@@ -109,7 +109,7 @@ def update(action_id: str, action: Dict[str, Any]) -> Dict[str, Any] | None:
     }
 
     with _get_conn() as conn:
-        cur = conn.execute("SELECT id FROM manual_actions WHERE id = ?", (action_id,))
+        cur = conn.execute("SELECT id FROM manual_actions WHERE id = :id", {"id": action_id})
         if cur.fetchone() is None:
             return None
 
@@ -121,14 +121,14 @@ def update(action_id: str, action: Dict[str, Any]) -> Dict[str, Any] | None:
                 contact = :contact,
                 type = :type,
                 priority = :priority,
-                dueDate = :dueDate,
+                "dueDate" = :dueDate,
                 status = :status,
                 notes = :notes,
-                lastModifiedDate = :lastModifiedDate,
-                adsolutCustomerId = :adsolutCustomerId,
-                visitReportId = :visitReportId,
-                communicatorId = :communicatorId,
-                quotationId = :quotationId
+                "lastModifiedDate" = :lastModifiedDate,
+                "adsolutCustomerId" = :adsolutCustomerId,
+                "visitReportId" = :visitReportId,
+                "communicatorId" = :communicatorId,
+                "quotationId" = :quotationId
             WHERE id = :id
             """,
             params,
@@ -136,12 +136,12 @@ def update(action_id: str, action: Dict[str, Any]) -> Dict[str, Any] | None:
 
     # return merged record
     with _get_conn() as conn:
-        cur = conn.execute("SELECT * FROM manual_actions WHERE id = ?", (action_id,))
+        cur = conn.execute("SELECT * FROM manual_actions WHERE id = :id", {"id": action_id})
         row = cur.fetchone()
         return _row_to_dict(row) if row is not None else None
 
 
 def delete(action_id: str) -> bool:
     with _get_conn() as conn:
-        cur = conn.execute("DELETE FROM manual_actions WHERE id = ?", (action_id,))
+        cur = conn.execute("DELETE FROM manual_actions WHERE id = :id", {"id": action_id})
         return cur.rowcount > 0

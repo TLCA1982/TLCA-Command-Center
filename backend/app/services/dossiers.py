@@ -56,7 +56,7 @@ def _with_event_contact(conn: Any, event: Dict[str, Any]) -> Dict[str, Any]:
     contact_id = event.get("contact_person_id")
     event["contact_person"] = None
     if contact_id is not None:
-        row = conn.execute("SELECT * FROM contact_persons WHERE id = ?", (contact_id,)).fetchone()
+        row = conn.execute("SELECT * FROM contact_persons WHERE id = :id", {"id": contact_id}).fetchone()
         if row is not None:
             event["contact_person"] = _row_to_dict(row)
     return event
@@ -68,11 +68,11 @@ def _with_relationships(conn: Any, dossier: Dict[str, Any]) -> Dict[str, Any]:
     dossier["company"] = None
     dossier["primary_contact_person"] = None
     if company_id:
-        row = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
+        row = conn.execute("SELECT * FROM companies WHERE id = :id", {"id": company_id}).fetchone()
         if row is not None:
             dossier["company"] = _row_to_dict(row)
     if contact_id:
-        row = conn.execute("SELECT * FROM contact_persons WHERE id = ?", (contact_id,)).fetchone()
+        row = conn.execute("SELECT * FROM contact_persons WHERE id = :id", {"id": contact_id}).fetchone()
         if row is not None:
             dossier["primary_contact_person"] = _row_to_dict(row)
     return dossier
@@ -87,7 +87,7 @@ def _resolve_relationship(
     company_id = payload.get("company_id") if "company_id" in payload else None
     contact_id = payload.get("primary_contact_person_id") if "primary_contact_person_id" in payload else None
     if company_id is not None:
-        company = conn.execute("SELECT id, name FROM companies WHERE id = ?", (company_id,)).fetchone()
+        company = conn.execute("SELECT id, name FROM companies WHERE id = :id", {"id": company_id}).fetchone()
         if company is None:
             raise ValueError("Company not found")
         customer = company[1]
@@ -95,10 +95,10 @@ def _resolve_relationship(
             contact = conn.execute(
                                 """
                                 SELECT id, name FROM contact_persons
-                                WHERE id = ? AND company_id = ?
-                                    AND (is_active = 1 OR id = ?)
+                                WHERE id = :contact_id AND company_id = :company_id
+                                    AND (is_active = 1 OR id = :allow_inactive_contact_id)
                                 """,
-                                (contact_id, company_id, allow_inactive_contact_id),
+                                {"contact_id": contact_id, "company_id": company_id, "allow_inactive_contact_id": allow_inactive_contact_id},
             ).fetchone()
             if contact is None:
                 raise ValueError("Primary contact person must be active and belong to the company")
@@ -125,10 +125,10 @@ def _validate_event_contact(
         SELECT 1
         FROM dossiers d
         JOIN contact_persons p ON p.company_id = d.company_id
-        WHERE d.id = ? AND p.id = ?
-          AND (? = 0 OR p.is_active = 1)
+                WHERE d.id = :dossier_id AND p.id = :contact_id
+                    AND (:active_only = 0 OR p.is_active = 1)
         """,
-        (dossier_id, contact_id, int(active_only)),
+                {"dossier_id": dossier_id, "contact_id": contact_id, "active_only": int(active_only)},
     ).fetchone()
     if row is None:
         if active_only:
@@ -148,7 +148,7 @@ def get_all(active_only: bool = True) -> List[Dict[str, Any]]:
         for r in rows:
             d = _row_to_dict(r)
             # determine last activity: prefer the most recent event_date, otherwise use created_at's date part
-            ev_cur = conn.execute("SELECT MAX(event_date) as last_event FROM dossier_events WHERE dossier_id = ?", (d.get("id"),))
+            ev_cur = conn.execute("SELECT MAX(event_date) as last_event FROM dossier_events WHERE dossier_id = :dossier_id", {"dossier_id": d.get("id")})
             ev_row = ev_cur.fetchone()
             last_event = None
             if ev_row is not None:
@@ -167,13 +167,13 @@ def get_all(active_only: bool = True) -> List[Dict[str, Any]]:
 
 def get_by_id(dossier_id: str) -> Optional[Dict[str, Any]]:
     with _get_conn() as conn:
-        cur = conn.execute("SELECT * FROM dossiers WHERE id = ?", (dossier_id,))
+        cur = conn.execute("SELECT * FROM dossiers WHERE id = :id", {"id": dossier_id})
         row = cur.fetchone()
         if row is None:
             return None
         dossier = _row_to_dict(row)
         _with_relationships(conn, dossier)
-        ev_cur = conn.execute("SELECT * FROM dossier_events WHERE dossier_id = ? ORDER BY event_date DESC", (dossier_id,))
+        ev_cur = conn.execute("SELECT * FROM dossier_events WHERE dossier_id = :dossier_id ORDER BY event_date DESC", {"dossier_id": dossier_id})
         events = [_with_event_contact(conn, _row_to_dict(e)) for e in ev_cur.fetchall()]
         dossier["events"] = events
         return dossier
@@ -217,12 +217,12 @@ def create(payload: Dict[str, Any]) -> Dict[str, Any]:
 def update(dossier_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     now = datetime.utcnow().isoformat()
     with _get_conn() as conn:
-        cur = conn.execute("SELECT id FROM dossiers WHERE id = ?", (dossier_id,))
+        cur = conn.execute("SELECT id FROM dossiers WHERE id = :id", {"id": dossier_id})
         if cur.fetchone() is None:
             return None
         existing_dossier = conn.execute(
-            "SELECT primary_contact_person_id FROM dossiers WHERE id = ?",
-            (dossier_id,),
+            "SELECT primary_contact_person_id FROM dossiers WHERE id = :id",
+            {"id": dossier_id},
         ).fetchone()
         existing_primary_id = existing_dossier[0] if existing_dossier else None
         company_id, primary_contact_id, customer, contact = _resolve_relationship(
@@ -281,7 +281,7 @@ def add_event(dossier_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, An
         "created_at": now,
     }
     with _get_conn() as conn:
-        cur = conn.execute("SELECT id FROM dossiers WHERE id = ?", (dossier_id,))
+        cur = conn.execute("SELECT id FROM dossiers WHERE id = :id", {"id": dossier_id})
         if cur.fetchone() is None:
             return None
         _validate_event_contact(conn, dossier_id, params["contact_person_id"], active_only=True)
@@ -332,12 +332,12 @@ def update_event(dossier_id: str, event_id: str, payload: Dict[str, Any]) -> Opt
     now = datetime.utcnow().isoformat()
     with _get_conn() as conn:
         # verify dossier exists
-        cur = conn.execute("SELECT id FROM dossiers WHERE id = ?", (dossier_id,))
+        cur = conn.execute("SELECT id FROM dossiers WHERE id = :id", {"id": dossier_id})
         if cur.fetchone() is None:
             return None
 
         # verify event exists and belongs to dossier
-        cur = conn.execute("SELECT id FROM dossier_events WHERE id = ? AND dossier_id = ?", (event_id, dossier_id))
+        cur = conn.execute("SELECT id FROM dossier_events WHERE id = :event_id AND dossier_id = :dossier_id", {"event_id": event_id, "dossier_id": dossier_id})
         if cur.fetchone() is None:
             return None
 
@@ -430,13 +430,13 @@ def get_for_actions() -> List[Dict[str, Any]]:
 def delete(dossier_id: str) -> bool:
     """Delete a dossier and its related events. Returns True if deleted, False if not found."""
     with _get_conn() as conn:
-        cur = conn.execute("SELECT id FROM dossiers WHERE id = ?", (dossier_id,))
+        cur = conn.execute("SELECT id FROM dossiers WHERE id = :id", {"id": dossier_id})
         if cur.fetchone() is None:
             return False
         # delete events first
-        conn.execute("DELETE FROM dossier_events WHERE dossier_id = ?", (dossier_id,))
+        conn.execute("DELETE FROM dossier_events WHERE dossier_id = :dossier_id", {"dossier_id": dossier_id})
         # delete dossier
-        conn.execute("DELETE FROM dossiers WHERE id = ?", (dossier_id,))
+        conn.execute("DELETE FROM dossiers WHERE id = :id", {"id": dossier_id})
     return True
 
 
@@ -445,19 +445,19 @@ def delete_event(dossier_id: str, event_id: str) -> Optional[Dict[str, Any]]:
     now = datetime.utcnow().isoformat()
     with _get_conn() as conn:
         # verify dossier exists
-        cur = conn.execute("SELECT id FROM dossiers WHERE id = ?", (dossier_id,))
+        cur = conn.execute("SELECT id FROM dossiers WHERE id = :id", {"id": dossier_id})
         if cur.fetchone() is None:
             return None
 
         # verify event exists and belongs to dossier
-        cur = conn.execute("SELECT id FROM dossier_events WHERE id = ? AND dossier_id = ?", (event_id, dossier_id))
+        cur = conn.execute("SELECT id FROM dossier_events WHERE id = :event_id AND dossier_id = :dossier_id", {"event_id": event_id, "dossier_id": dossier_id})
         if cur.fetchone() is None:
             return None
 
         # delete the event
-        conn.execute("DELETE FROM dossier_events WHERE id = ?", (event_id,))
+        conn.execute("DELETE FROM dossier_events WHERE id = :id", {"id": event_id})
 
         # update dossier updated_at timestamp
-        conn.execute("UPDATE dossiers SET updated_at = ? WHERE id = ?", (now, dossier_id))
+        conn.execute("UPDATE dossiers SET updated_at = :updated_at WHERE id = :id", {"updated_at": now, "id": dossier_id})
 
     return get_by_id(dossier_id)

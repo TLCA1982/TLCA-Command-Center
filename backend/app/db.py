@@ -28,6 +28,26 @@ def is_postgresql() -> bool:
     return BACKEND == "postgresql"
 
 
+def has_column(connection: Any, table_name: str, column_name: str) -> bool:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name):
+        raise ValueError("Invalid table name")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", column_name):
+        raise ValueError("Invalid column name")
+    if is_postgresql():
+        row = connection.execute(
+            text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema = current_schema() "
+                "AND table_name = :table_name AND column_name = :column_name"
+            ),
+            {"table_name": table_name, "column_name": column_name},
+        ).fetchone()
+    else:
+        row = connection.execute(f'PRAGMA table_info("{table_name}")')
+        row = next((item for item in row if item[1] == column_name), None)
+    return row is not None
+
+
 class _CompatRow:
     def __init__(self, row: Any) -> None:
         self._values = tuple(row)

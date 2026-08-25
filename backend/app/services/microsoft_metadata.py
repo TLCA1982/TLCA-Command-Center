@@ -1,19 +1,11 @@
 from __future__ import annotations
 
-import sqlite3
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.db import get_conn
 
-DB_PATH = Path(__file__).resolve().parents[3] / "database" / "actions.db"
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-
-def _get_conn():
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    return conn
+_get_conn = get_conn
 
 
 def _ensure_table() -> None:
@@ -35,7 +27,7 @@ def _ensure_table() -> None:
 _ensure_table()
 
 
-def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
+def _row_to_dict(row: Any) -> Dict[str, Any]:
     return {k: row[k] for k in row.keys()}
 
 

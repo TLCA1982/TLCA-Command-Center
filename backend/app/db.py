@@ -1,0 +1,103 @@
+from __future__ import annotations
+
+import sqlite3
+import re
+from contextlib import AbstractContextManager
+from pathlib import Path
+from typing import Any, Iterator
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Connection
+
+
+DB_PATH = Path(__file__).resolve().parents[2] / "database" / "actions.db"
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+DATABASE_URL = f"sqlite:///{DB_PATH.as_posix()}"
+engine = create_engine(DATABASE_URL, future=True)
+
+
+class _CompatRow:
+    def __init__(self, row: Any) -> None:
+        self._values = tuple(row)
+        self._mapping = dict(row._mapping)
+
+    def __getitem__(self, key: int | str) -> Any:
+        if isinstance(key, int):
+            return self._values[key]
+        return self._mapping[key]
+
+    def keys(self):
+        return self._mapping.keys()
+
+
+class _CompatResult:
+    def __init__(self, result: Any) -> None:
+        self._result = result
+        self.rowcount = result.rowcount
+
+    def fetchone(self) -> _CompatRow | None:
+        row = self._result.fetchone()
+        return _CompatRow(row) if row is not None else None
+
+    def fetchall(self) -> list[_CompatRow]:
+        return [_CompatRow(row) for row in self._result.fetchall()]
+
+    def __iter__(self) -> Iterator[_CompatRow]:
+        return iter(self.fetchall())
+
+
+def _statement_and_params(statement: Any, parameters: Any) -> tuple[Any, Any]:
+    if not isinstance(statement, str) or "?" not in statement or not isinstance(parameters, (tuple, list)):
+        return statement, parameters
+    names = []
+    index = 0
+
+    def replace(_match: re.Match[str]) -> str:
+        nonlocal index
+        name = f"param_{index}"
+        names.append(name)
+        index += 1
+        return f":{name}"
+
+    converted = re.sub(r"\?", replace, statement)
+    return text(converted), dict(zip(names, parameters))
+
+
+class _CompatConnection(AbstractContextManager["_CompatConnection"]):
+    def __init__(self, connection: Connection) -> None:
+        self._connection = connection
+
+    def execute(self, statement: Any, parameters: Any = None) -> _CompatResult:
+        statement, parameters = _statement_and_params(statement, parameters)
+        if isinstance(statement, str):
+            statement = text(statement)
+        if parameters is None:
+            result = self._connection.execute(statement)
+        else:
+            result = self._connection.execute(statement, parameters)
+        return _CompatResult(result)
+
+    def commit(self) -> None:
+        self._connection.commit()
+
+    def rollback(self) -> None:
+        self._connection.rollback()
+
+    def close(self) -> None:
+        self._connection.close()
+
+    def __enter__(self) -> "_CompatConnection":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        try:
+            if exc_type is None:
+                self.commit()
+            else:
+                self.rollback()
+        finally:
+            self.close()
+
+
+def get_conn() -> _CompatConnection:
+    return _CompatConnection(engine.connect())

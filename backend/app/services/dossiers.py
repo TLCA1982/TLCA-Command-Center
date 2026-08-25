@@ -1,22 +1,14 @@
 from __future__ import annotations
 
-import sqlite3
 from datetime import datetime
-from pathlib import Path
 import uuid
 from typing import Any, Dict, List, Optional
 
+from app.db import get_conn
 from app.services import companies as company_service
 
 
-DB_PATH = Path(__file__).resolve().parents[3] / "database" / "actions.db"
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-
-def _get_conn():
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    return conn
+_get_conn = get_conn
 
 
 def _ensure_tables() -> None:
@@ -56,11 +48,11 @@ def _ensure_tables() -> None:
 _ensure_tables()
 
 
-def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
+def _row_to_dict(row: Any) -> Dict[str, Any]:
     return {k: row[k] for k in row.keys()}
 
 
-def _with_event_contact(conn: sqlite3.Connection, event: Dict[str, Any]) -> Dict[str, Any]:
+def _with_event_contact(conn: Any, event: Dict[str, Any]) -> Dict[str, Any]:
     contact_id = event.get("contact_person_id")
     event["contact_person"] = None
     if contact_id is not None:
@@ -70,7 +62,7 @@ def _with_event_contact(conn: sqlite3.Connection, event: Dict[str, Any]) -> Dict
     return event
 
 
-def _with_relationships(conn: sqlite3.Connection, dossier: Dict[str, Any]) -> Dict[str, Any]:
+def _with_relationships(conn: Any, dossier: Dict[str, Any]) -> Dict[str, Any]:
     company_id = dossier.get("company_id")
     contact_id = dossier.get("primary_contact_person_id")
     dossier["company"] = None
@@ -87,7 +79,7 @@ def _with_relationships(conn: sqlite3.Connection, dossier: Dict[str, Any]) -> Di
 
 
 def _resolve_relationship(
-    conn: sqlite3.Connection,
+    conn: Any,
     payload: Dict[str, Any],
     *,
     allow_inactive_contact_id: Optional[str] = None,
@@ -120,7 +112,7 @@ def _resolve_relationship(
 
 
 def _validate_event_contact(
-    conn: sqlite3.Connection,
+    conn: Any,
     dossier_id: str,
     contact_id: Optional[str],
     *,

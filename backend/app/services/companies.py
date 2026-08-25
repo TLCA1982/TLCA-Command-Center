@@ -8,13 +8,13 @@ from pathlib import Path
 import uuid
 from typing import Any, Dict, List, Optional
 
+from app.db import DB_PATH, get_conn
 from app.config import get_settings
 from app.services.microsoft_graph import MicrosoftGraphClient
 
 from app.services.microsoft_graph import MicrosoftGraphClient
 
 
-DB_PATH = Path(__file__).resolve().parents[3] / "database" / "actions.db"
 ALLOWED_RELATIONSHIP_TYPES = {"Klant", "Prospect", "Leverancier"}
 
 
@@ -34,10 +34,7 @@ class LinkedContactSyncError(ValueError):
         self.compensation_complete = compensation_complete
 
 
-def _get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    return conn
+_get_conn = get_conn
 
 
 def normalize(value: str | None) -> str:

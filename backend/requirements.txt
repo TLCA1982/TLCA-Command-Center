@@ -6,3 +6,4 @@ msal==1.31.0
 tzdata
 openpyxl==3.1.5
 SQLAlchemy==2.0.36
+psycopg[binary]==3.2.3

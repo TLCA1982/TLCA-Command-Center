@@ -8,7 +8,7 @@ from pathlib import Path
 import uuid
 from typing import Any, Dict, List, Optional
 
-from app.db import DB_PATH, get_conn
+from app.db import DB_PATH, get_conn, is_sqlite
 from app.config import get_settings
 from app.services.microsoft_graph import MicrosoftGraphClient
 
@@ -262,6 +262,8 @@ def reconcile_outlook_contacts(outlook_contacts: list[Dict[str, Any]]) -> Dict[s
 
 def import_outlook_business_contacts(outlook_contacts: list[Dict[str, Any]]) -> Dict[str, Any]:
     """Link safe matches and import unmatched business contacts in one transaction."""
+    if not is_sqlite():
+        raise ValueError("Outlook contact import requires the SQLite transaction path in Step 3A")
     allowed_categories = {category.casefold() for category in get_settings().outlook_business_category_list}
     filtered_contacts = [
         contact for contact in outlook_contacts
@@ -844,6 +846,8 @@ def _backup_database() -> Path:
 
 async def synchronize_linked_outlook_contacts(graph_client: Any) -> Dict[str, Any]:
     """Synchronize all currently linked contacts with transactional local writes."""
+    if not is_sqlite():
+        raise LinkedContactSyncError("Outlook contact synchronization requires the SQLite transaction path in Step 3A")
     backup_path = _backup_database()
     linked_ids = get_linked_outlook_ids()
     if len(linked_ids) != len(set(linked_ids)):

@@ -9,11 +9,23 @@ from typing import Any, Iterator
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection
 
+from app.config import get_settings
+
 
 DB_PATH = Path(__file__).resolve().parents[2] / "database" / "actions.db"
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-DATABASE_URL = f"sqlite:///{DB_PATH.as_posix()}"
+_settings = get_settings()
+BACKEND = _settings.resolved_database_backend
+DATABASE_URL = _settings.database_url or f"sqlite:///{DB_PATH.as_posix()}"
 engine = create_engine(DATABASE_URL, future=True)
+
+
+def is_sqlite() -> bool:
+    return BACKEND == "sqlite"
+
+
+def is_postgresql() -> bool:
+    return BACKEND == "postgresql"
 
 
 class _CompatRow:

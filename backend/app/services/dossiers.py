@@ -4,7 +4,7 @@ from datetime import datetime
 import uuid
 from typing import Any, Dict, List, Optional
 
-from app.db import get_conn
+from app.db import get_conn, is_postgresql, require_tables
 from app.services import companies as company_service
 
 
@@ -12,6 +12,10 @@ _get_conn = get_conn
 
 
 def _ensure_tables() -> None:
+    if is_postgresql():
+        require_tables(("dossiers", "dossier_events"))
+        return
+
     with _get_conn() as conn:
         conn.execute(
             """

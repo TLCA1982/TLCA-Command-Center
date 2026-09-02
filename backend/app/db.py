@@ -6,7 +6,7 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any, Iterator
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Connection
 
 from app.config import get_settings
@@ -26,6 +26,25 @@ def is_sqlite() -> bool:
 
 def is_postgresql() -> bool:
     return BACKEND == "postgresql"
+
+
+def require_tables(table_names: tuple[str, ...]) -> None:
+    if is_sqlite():
+        return
+    if not is_postgresql():
+        raise RuntimeError(f"Unsupported database backend: {BACKEND}")
+    if not table_names:
+        return
+    if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name) for table_name in table_names):
+        raise ValueError("Invalid table name")
+
+    with engine.connect() as connection:
+        inspector = inspect(connection)
+        missing_tables = [table_name for table_name in table_names if not inspector.has_table(table_name)]
+    if missing_tables:
+        raise RuntimeError(
+            "PostgreSQL schema is missing required table(s): " + ", ".join(missing_tables)
+        )
 
 
 def has_column(connection: Any, table_name: str, column_name: str) -> bool:

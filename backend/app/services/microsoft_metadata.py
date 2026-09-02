@@ -3,12 +3,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from app.db import get_conn
+from app.db import get_conn, is_postgresql, require_tables
 
 _get_conn = get_conn
 
 
 def _ensure_table() -> None:
+    if is_postgresql():
+        require_tables(("microsoft_metadata",))
+        return
+
     with _get_conn() as conn:
         conn.execute(
             """

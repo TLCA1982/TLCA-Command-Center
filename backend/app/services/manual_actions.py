@@ -5,12 +5,16 @@ from datetime import datetime
 import uuid
 from typing import Any, Dict, List
 
-from app.db import get_conn
+from app.db import get_conn, is_postgresql, require_tables
 
 _get_conn = get_conn
 
 
 def _ensure_table() -> None:
+    if is_postgresql():
+        require_tables(("manual_actions",))
+        return
+
     with _get_conn() as conn:
         conn.execute(
             """

@@ -4,7 +4,7 @@ from datetime import datetime
 import uuid
 from typing import Any, Dict, List, Optional
 
-from app.db import get_conn, is_postgresql, require_tables
+from app.db import get_conn, has_column, is_postgresql, require_tables
 from app.services import companies as company_service
 
 
@@ -43,10 +43,13 @@ def _ensure_tables() -> None:
                 notes TEXT,
                 follow_up_date TEXT,
                 status_change TEXT,
-                created_at TEXT
+                created_at TEXT,
+                updated_at TEXT
             )
             """
         )
+        if not has_column(conn, "dossier_events", "updated_at"):
+            conn.execute("ALTER TABLE dossier_events ADD COLUMN updated_at TEXT")
 
 
 _ensure_tables()
@@ -151,19 +154,27 @@ def get_all(active_only: bool = True) -> List[Dict[str, Any]]:
 
         for r in rows:
             d = _row_to_dict(r)
-            # determine last activity: prefer the most recent event_date, otherwise use created_at's date part
-            ev_cur = conn.execute("SELECT MAX(event_date) as last_event FROM dossier_events WHERE dossier_id = :dossier_id", {"dossier_id": d.get("id")})
+            # last_contact: most recent contact moment, regardless of event_type
+            ev_cur = conn.execute(
+                "SELECT MAX(event_date) as last_event, MAX(created_at) as last_event_created, MAX(updated_at) as last_event_updated "
+                "FROM dossier_events WHERE dossier_id = :dossier_id",
+                {"dossier_id": d.get("id")},
+            )
             ev_row = ev_cur.fetchone()
-            last_event = None
-            if ev_row is not None:
-                last_event = ev_row[0]
+            last_event = ev_row[0] if ev_row is not None else None
+            last_event_created = ev_row[1] if ev_row is not None else None
+            last_event_updated = ev_row[2] if ev_row is not None else None
 
             d["last_contact"] = last_event or ""
-            if last_event:
-                d["last_activity"] = last_event
-            else:
-                created = d.get("created_at") or ""
-                d["last_activity"] = created.split("T")[0] if created else ""
+
+            # last_activity: most recent actual modification timestamp, not event_date
+            activity_candidates = [
+                d.get("updated_at"),
+                d.get("created_at"),
+                last_event_created,
+                last_event_updated,
+            ]
+            d["last_activity"] = max((c for c in activity_candidates if c), default="")
 
             results.append(_with_relationships(conn, d))
 
@@ -284,6 +295,7 @@ def add_event(dossier_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, An
         "status_change": payload.get("status_change"),
         "contact_person_id": contact_person_id,
         "created_at": now,
+        "updated_at": now,
     }
     with _get_conn() as conn:
         cur = conn.execute("SELECT id FROM dossiers WHERE id = :id", {"id": dossier_id})
@@ -294,10 +306,10 @@ def add_event(dossier_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, An
             """
             INSERT INTO dossier_events (
                 id, dossier_id, event_date, event_type, notes, follow_up_date,
-                status_change, contact_person_id, created_at
+                status_change, contact_person_id, created_at, updated_at
             ) VALUES (
                 :id, :dossier_id, :event_date, :event_type, :notes, :follow_up_date,
-                :status_change, :contact_person_id, :created_at
+                :status_change, :contact_person_id, :created_at, :updated_at
             )
             """,
             params,
@@ -373,6 +385,8 @@ def update_event(dossier_id: str, event_id: str, payload: Dict[str, Any]) -> Opt
                 exec_params[key] = value
 
         if set_parts:
+            set_parts.append("updated_at = :updated_at")
+            exec_params["updated_at"] = now
             sql = f"UPDATE dossier_events SET {', '.join(set_parts)} WHERE id = :id"
             conn.execute(sql, exec_params)
 

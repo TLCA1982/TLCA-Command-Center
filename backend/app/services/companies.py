@@ -846,9 +846,8 @@ def _backup_database() -> Path:
 
 async def synchronize_linked_outlook_contacts(graph_client: Any) -> Dict[str, Any]:
     """Synchronize all currently linked contacts with transactional local writes."""
-    if not is_sqlite():
-        raise LinkedContactSyncError("Outlook contact synchronization requires the SQLite transaction path in Step 3A")
-    backup_path = _backup_database()
+    # File-level backups only make sense for the local SQLite database file.
+    backup_path = _backup_database() if is_sqlite() else None
     linked_ids = get_linked_outlook_ids()
     if len(linked_ids) != len(set(linked_ids)):
         raise LinkedContactSyncError("Synchronization aborted: duplicate linked Outlook IDs detected")
@@ -875,51 +874,51 @@ async def synchronize_linked_outlook_contacts(graph_client: Any) -> Dict[str, An
             await graph_client.update_contact(outlook_id, _outlook_patch(fields))
             graph_changed.append(outlook_id)
 
-        connection = sqlite3.connect(str(DB_PATH), isolation_level=None)
-        connection.row_factory = sqlite3.Row
-        try:
-            connection.execute("BEGIN IMMEDIATE")
+        # _get_conn() commits on success and rolls back automatically on
+        # exception, so this block is transactional on both SQLite and
+        # PostgreSQL without any backend-specific connection handling.
+        with _get_conn() as conn:
             for local_id, fields in plan["local_updates"].items():
-                contact_row = connection.execute(
-                    "SELECT company_id FROM contact_persons WHERE id = ? AND outlook_contact_id IS NOT NULL",
-                    (local_id,),
+                contact_row = conn.execute(
+                    "SELECT company_id FROM contact_persons WHERE id = :id AND outlook_contact_id IS NOT NULL",
+                    {"id": local_id},
                 ).fetchone()
                 if contact_row is None:
                     raise LinkedContactSyncError(f"Local contact {local_id} is no longer linked")
                 for field, value in fields.items():
                     if field == "company":
-                        duplicate = connection.execute(
-                            "SELECT id FROM companies WHERE normalized_name = ? AND id != ?",
-                            (normalize(value), contact_row["company_id"]),
+                        duplicate = conn.execute(
+                            "SELECT id FROM companies WHERE normalized_name = :normalized_name AND id != :company_id",
+                            {"normalized_name": normalize(value), "company_id": contact_row["company_id"]},
                         ).fetchone()
                         if duplicate is not None:
                             raise LinkedContactSyncError(f"Company update for contact {local_id} would create a duplicate company")
-                        cursor = connection.execute(
-                            "UPDATE companies SET name = ?, normalized_name = ? WHERE id = ?",
-                            (value, normalize(value), contact_row["company_id"]),
+                        cursor = conn.execute(
+                            "UPDATE companies SET name = :name, normalized_name = :normalized_name WHERE id = :company_id",
+                            {"name": value, "normalized_name": normalize(value), "company_id": contact_row["company_id"]},
                         )
                     else:
-                        cursor = connection.execute(
-                            f"UPDATE contact_persons SET {field} = ? WHERE id = ? AND outlook_contact_id IS NOT NULL",
-                            (value, local_id),
+                        cursor = conn.execute(
+                            f"UPDATE contact_persons SET {field} = :value WHERE id = :id AND outlook_contact_id IS NOT NULL",
+                            {"value": value, "id": local_id},
                         )
                     if cursor.rowcount != 1:
                         raise LinkedContactSyncError(f"Local update failed for contact {local_id}")
             links = {
                 row["id"]: row["outlook_contact_id"]
-                for row in connection.execute("SELECT id, outlook_contact_id FROM contact_persons WHERE outlook_contact_id IS NOT NULL")
+                for row in conn.execute("SELECT id, outlook_contact_id FROM contact_persons WHERE outlook_contact_id IS NOT NULL")
             }
             expected_links = {contact["local_contact_id"]: contact["outlook_contact_id"] for contact in contacts}
             if any(links.get(local_id) != outlook_id for local_id, outlook_id in expected_links.items()):
                 raise LinkedContactSyncError("Local link integrity validation failed")
-            if connection.execute("SELECT COUNT(*) FROM (SELECT outlook_contact_id FROM contact_persons WHERE outlook_contact_id IS NOT NULL GROUP BY outlook_contact_id HAVING COUNT(*) > 1)").fetchone()[0] != 0:
+            duplicate_count = conn.execute(
+                "SELECT COUNT(*) FROM ("
+                "SELECT outlook_contact_id FROM contact_persons WHERE outlook_contact_id IS NOT NULL "
+                "GROUP BY outlook_contact_id HAVING COUNT(*) > 1"
+                ") AS duplicate_links"
+            ).fetchone()[0]
+            if duplicate_count != 0:
                 raise LinkedContactSyncError("Duplicate linked Outlook IDs detected")
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.close()
     except Exception as exc:
         compensation_complete = True
         for outlook_id in graph_changed:
@@ -942,7 +941,7 @@ async def synchronize_linked_outlook_contacts(graph_client: Any) -> Dict[str, An
         ) from exc
     return {
         "status": "completed",
-        "backup_filename": backup_path.name,
+        "backup_filename": backup_path.name if backup_path else None,
         "linked_contacts": plan["linked_contacts"],
         "outlook_contacts_updated": len(plan["outlook_updates"]),
         "command_center_contacts_updated": len(plan["local_updates"]),

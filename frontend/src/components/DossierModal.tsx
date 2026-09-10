@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { belgianToIso, isBelgianDate, isValidBelgianDate } from '../utils/date'
 import { apiUrl } from '../api'
 import ContactPersonModal from './ContactPersonModal'
+import BelgianDateInput from './BelgianDateInput'
 
 type Props = {
   onClose: () => void
@@ -178,7 +179,7 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
           <option value="Wachtend">Wachtend</option>
           <option value="Afgesloten">Afgesloten</option>
         </select></label>
-        <label>Opvolgdatum<input type="text" placeholder="dd/mm/jjjj" value={followUp} onChange={(e) => setFollowUp(e.target.value)} /></label>
+        <label>Opvolgdatum<BelgianDateInput value={followUp} onChange={setFollowUp} /></label>
         {error && <p className="form-error">{error}</p>}
         <div className="modal-actions">
           <button type="button" onClick={onClose} disabled={saving || creatingCompany}>Annuleren</button>

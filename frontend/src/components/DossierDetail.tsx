@@ -3,6 +3,7 @@ import { isoToBelgian, belgianToIso, isBelgianDate, isValidBelgianDate } from '.
 import DossierEventModal from './DossierEventModal'
 import CompanyModal from './CompanyModal'
 import ContactPersonModal from './ContactPersonModal'
+import BelgianDateInput from './BelgianDateInput'
 import { apiUrl } from '../api'
 
 type Props = { id: string; onClose: () => void }
@@ -163,7 +164,7 @@ const DossierDetail = ({ id, onClose }: Props) => {
         <label>Contactpersoon<select value={primaryContactId} onChange={(e) => setPrimaryContactId(e.target.value)} disabled={!companyId}><option value="">Geen primaire contactpersoon</option>{selectableContacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}{!contact.is_active ? ' (inactief)' : ''}</option>)}</select></label>
         <label>Onderwerp *<input value={subject} onChange={(e) => setSubject(e.target.value)} /></label>
         <label>Status<select value={status} onChange={(e) => setStatus(e.target.value)}><option>Lopend</option><option>Wachtend</option><option>Afgesloten</option></select></label>
-        <label>Opvolgdatum<input type="text" placeholder="dd/mm/jjjj" value={followUp} onChange={(e) => setFollowUp(e.target.value)} /></label>
+        <label>Opvolgdatum<BelgianDateInput value={followUp} onChange={setFollowUp} /></label>
       </>}
 
       {companyId && <div className="detail-section contact-list"><div className="detail-section__heading"><h4>Contactpersonen</h4><button type="button" className="action-btn action-btn--secondary" onClick={() => setContactBeingEdited(null)}>Contactpersoon toevoegen</button></div>

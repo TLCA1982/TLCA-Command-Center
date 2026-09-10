@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { belgianToIso, isoToBelgian, isBelgianDate, isValidBelgianDate } from '../utils/date'
 import { apiUrl } from '../api'
+import BelgianDateInput from './BelgianDateInput'
 
 type Props = {
   dossierId: string
@@ -164,7 +165,7 @@ const DossierEventModal = ({ dossierId, dossierCompanyId, currentStatus = 'Lopen
 
         <label>
           Datum *
-          <input value={date} onChange={(e) => setDate(e.target.value)} placeholder="dd/mm/jjjj" />
+          <BelgianDateInput value={date} onChange={setDate} />
         </label>
 
         <label>
@@ -186,7 +187,7 @@ const DossierEventModal = ({ dossierId, dossierCompanyId, currentStatus = 'Lopen
 
         <label>
           Nieuwe opvolgdatum
-          <input value={followUp} onChange={(e) => setFollowUp(e.target.value)} placeholder="dd/mm/jjjj" />
+          <BelgianDateInput value={followUp} onChange={setFollowUp} />
         </label>
 
         {dossierCompanyId && (

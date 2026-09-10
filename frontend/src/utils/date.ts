@@ -57,3 +57,23 @@ export function isValidBelgianDate(value: string): boolean {
   const daysInMonth = new Date(yyyy, mm, 0).getDate()
   return dd <= daysInMonth
 }
+
+// Convert a local Date -> DD/MM/YYYY (for calendar picker selections)
+export function dateToBelgian(date: Date): string {
+  const dd = String(date.getDate()).padStart(2, '0')
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const yyyy = String(date.getFullYear())
+  return `${dd}/${mm}/${yyyy}`
+}
+
+// Parse a Belgian DD/MM/YYYY string into a Date at local midnight, or null if invalid
+export function parseBelgianToDate(value: string | undefined): Date | null {
+  if (!value || !isBelgianDate(value) || !isValidBelgianDate(value)) return null
+  const [ddS, mmS, yyyyS] = value.split('/')
+  return new Date(parseInt(yyyyS, 10), parseInt(mmS, 10) - 1, parseInt(ddS, 10))
+}
+
+export function isWeekend(date: Date): boolean {
+  const day = date.getDay()
+  return day === 0 || day === 6
+}

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import type { Action } from '../types/Action'
 import { belgianToIso, isIsoDate, isBelgianDate, isValidBelgianDate, isoToBelgian } from '../utils/date'
 import { apiUrl } from '../api'
+import BelgianDateInput from './BelgianDateInput'
 
 type Props = {
   onClose: () => void
@@ -192,13 +193,7 @@ const ManualActionModal = ({ onClose, onSaved, initial }: Props) => {
 
         <label>
           Opvolgdatum
-          <input
-            type="text"
-            placeholder="dd/mm/jjjj"
-            value={dueDate}
-            onChange={(e) => setDueDate(e.target.value)}
-            pattern="[0-3][0-9]/[0-1][0-9]/[0-9]{4}"
-          />
+          <BelgianDateInput value={dueDate} onChange={setDueDate} />
         </label>
 
         <label>

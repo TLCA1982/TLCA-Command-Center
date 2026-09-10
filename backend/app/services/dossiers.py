@@ -260,8 +260,8 @@ def update(dossier_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]
                 **params,
                 "company_id": company_id,
                 "primary_contact_person_id": primary_contact_id,
-                "company_id_supplied": int("company_id" in payload),
-                "contact_id_supplied": int("primary_contact_person_id" in payload),
+                "company_id_supplied": "company_id" in payload,
+                "contact_id_supplied": "primary_contact_person_id" in payload,
             },
         )
     return get_by_id(dossier_id)

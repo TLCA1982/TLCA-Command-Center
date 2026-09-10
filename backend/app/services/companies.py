@@ -1022,6 +1022,8 @@ def create_contact(company_id: str, payload: Dict[str, Any]) -> Optional[Dict[st
         "created_at": now,
         "updated_at": now,
     }
+    contact["is_active"] = int(contact["is_active"])
+    contact["is_primary"] = int(contact["is_primary"])
     with _get_conn() as conn:
         if _get_company(conn, company_id) is None:
             return None

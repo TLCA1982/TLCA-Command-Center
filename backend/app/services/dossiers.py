@@ -158,6 +158,7 @@ def get_all(active_only: bool = True) -> List[Dict[str, Any]]:
             if ev_row is not None:
                 last_event = ev_row[0]
 
+            d["last_contact"] = last_event or ""
             if last_event:
                 d["last_activity"] = last_event
             else:

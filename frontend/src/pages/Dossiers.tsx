@@ -20,7 +20,7 @@ const Dossiers = () => {
     customer: (dossier) => dossier.customer ?? '',
     contact: (dossier) => dossier.contact ?? '',
     subject: (dossier) => dossier.subject ?? '',
-    last_contact: () => '',
+    last_contact: (dossier) => dossier.last_contact ?? '',
     status: (dossier) => dossier.status ?? '',
     follow_up_date: (dossier) => dossier.follow_up_date ?? '',
     source: (dossier) => dossier.source ?? 'Dossier',
@@ -160,7 +160,7 @@ const Dossiers = () => {
                           <td>{d.company?.name || d.customer}</td>
                           <td>{d.contact}</td>
                           <td>{d.subject}</td>
-                          <td>{/* last contact type could be derived later */}</td>
+                          <td>{isoToBelgian(d.last_contact ?? '')}</td>
                           <td>{d.status}</td>
                           <td>{d.follow_up_date ? isoToBelgian(d.follow_up_date) : ''}</td>
                           <td>{d.source ?? 'Dossier'}</td>

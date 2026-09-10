@@ -207,7 +207,7 @@ const Dashboard = () => {
       setError(null)
 
       try {
-        const response = await fetch(apiUrl('/actions'), {
+        const response = await fetch(apiUrl('/actions/'), {
           headers: {
             Accept: 'application/json',
           },
@@ -250,7 +250,7 @@ const Dashboard = () => {
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch(apiUrl('/actions'), { headers: { Accept: 'application/json' } })
+      const response = await fetch(apiUrl('/actions/'), { headers: { Accept: 'application/json' } })
       if (!response.ok) throw new Error('Actions could not be loaded.')
       const payload: MicrosoftActionResponse[] = await response.json()
       setActions(payload.map(mapMicrosoftAction))

@@ -54,7 +54,7 @@ async def stop_outlook_sync_task() -> None:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://192.168.0.145:5173"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://192.168.0.145:5173" , "https://black-flower-0d59db80f.3.azurestaticapps.net"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

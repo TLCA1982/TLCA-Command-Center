@@ -14,3 +14,5 @@ azure-logs*/
 azure-logs*.zip
 
 *.zip
+
+backend/azure-startup/

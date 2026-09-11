@@ -17,7 +17,25 @@ DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 _settings = get_settings()
 BACKEND = _settings.resolved_database_backend
 DATABASE_URL = _settings.database_url or f"sqlite:///{DB_PATH.as_posix()}"
-engine = create_engine(DATABASE_URL, future=True)
+
+if BACKEND == "postgresql":
+    # Azure/managed PostgreSQL can silently drop idle TCP connections (proxy or
+    # firewall NAT timeouts). Without pool_pre_ping, a pooled connection that
+    # was closed by the network can hang for many seconds before the driver
+    # detects the failure, which matches the intermittent multi-second to
+    # ~15s request latency observed in production. pool_pre_ping issues a
+    # cheap liveness check before handing out a pooled connection, and
+    # pool_recycle proactively retires connections before they go stale.
+    # connect_args bounds how long establishing a *new* connection may take.
+    engine = create_engine(
+        DATABASE_URL,
+        future=True,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        connect_args={"connect_timeout": 10},
+    )
+else:
+    engine = create_engine(DATABASE_URL, future=True)
 
 
 def is_sqlite() -> bool:

@@ -216,12 +216,17 @@ async def get_microsoft_actions() -> list[dict[str, Any]]:
                 results = await asyncio.gather(*(fetch_sender(task) for _index, task in batch))
                 sender_results.update({index: result for (index, _task), result in zip(batch, results)})
 
+            # Fetch metadata for every pending action in one query instead of one per action.
+            metadata_by_id = microsoft_metadata.get_many(
+                normalized["id"] for normalized, _task, _is_flagged in pending_actions
+            )
+
             for index, (normalized, _task, _is_flagged) in enumerate(pending_actions):
                 if index in sender_results:
                     normalized.update(sender_results[index])
 
                 # merge local metadata if present
-                meta = microsoft_metadata.get(normalized["id"]) or {}
+                meta = metadata_by_id.get(normalized["id"], {})
                 normalized["customer"] = meta.get("customer", "")
                 normalized["contact"] = meta.get("contact", "")
                 # return actionType in the same field name used by manual actions
@@ -371,12 +376,8 @@ async def get_all_actions() -> list[dict[str, Any]]:
     try:
         ms_actions = await get_microsoft_actions()
         for a in ms_actions:
+            # get_microsoft_actions() already merges microsoft_metadata for each action.
             if a.get("id"):
-                # ensure metadata merged here too (for the combined /actions endpoint)
-                meta = microsoft_metadata.get(a.get("id")) or {}
-                a["customer"] = meta.get("customer", "")
-                a["contact"] = meta.get("contact", "")
-                a["actionType"] = meta.get("action_type") or a.get("actionType") or ""
                 combined.setdefault(a.get("id"), a)
     except HTTPException:
         # propagate microsoft errors

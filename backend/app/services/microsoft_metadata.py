@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from app.db import get_conn, is_postgresql, require_tables
 
@@ -40,6 +40,21 @@ def get(ms_id: str) -> Optional[Dict[str, Any]]:
         cur = conn.execute("SELECT * FROM microsoft_metadata WHERE ms_id = :ms_id", {"ms_id": ms_id})
         row = cur.fetchone()
         return _row_to_dict(row) if row is not None else None
+
+
+def get_many(ms_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+    """Fetch metadata for several ms_ids in a single query/connection instead of one per id."""
+    ids = [value for value in dict.fromkeys(ms_ids) if value]
+    if not ids:
+        return {}
+    with _get_conn() as conn:
+        params = {f"id_{index}": value for index, value in enumerate(ids)}
+        placeholders = ", ".join(f":{name}" for name in params)
+        rows = conn.execute(
+            f"SELECT * FROM microsoft_metadata WHERE ms_id IN ({placeholders})",
+            params,
+        ).fetchall()
+    return {row["ms_id"]: _row_to_dict(row) for row in rows}
 
 
 def upsert(ms_id: str, source: str | None = None, customer: str | None = None, contact: str | None = None, action_type: str | None = None, last_modified: str | None = None) -> Dict[str, Any]:

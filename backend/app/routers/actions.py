@@ -122,10 +122,15 @@ def _normalize_task(task: dict[str, Any], source: str, microsoft_list: str) -> d
     }
 
 
-async def _get_flagged_email_sender(http_client: httpx.AsyncClient, headers: dict[str, str], task: dict[str, Any]) -> dict[str, str]:
+_EMPTY_SENDER = {"senderName": "", "senderEmail": ""}
+_BATCH_MAX_SUBREQUESTS = 20
+
+
+def _flagged_message_id(task: dict[str, Any]) -> str | None:
+    """Return the Outlook/mail message id backing a flagged task, if any."""
     linked_resources = task.get("linkedResources") or []
     if not isinstance(linked_resources, list):
-        return {"senderName": "", "senderEmail": ""}
+        return None
 
     for resource in linked_resources:
         if not isinstance(resource, dict):
@@ -136,23 +141,73 @@ async def _get_flagged_email_sender(http_client: httpx.AsyncClient, headers: dic
         if not external_id or ("outlook" not in application_name and "mail" not in application_name):
             continue
 
-        try:
-            message_response = await http_client.get(
-                f"https://graph.microsoft.com/v1.0/me/messages/{quote(str(external_id), safe='')}",
-                params={"$select": "from"},
-                headers=headers,
-            )
-            message_response.raise_for_status()
-            sender = message_response.json().get("from") or {}
-            sender_address = sender.get("emailAddress") or {}
-            return {
-                "senderName": str(sender_address.get("name") or ""),
-                "senderEmail": str(sender_address.get("address") or ""),
-            }
-        except (httpx.HTTPError, ValueError, TypeError, AttributeError):
-            return {"senderName": "", "senderEmail": ""}
+        return str(external_id)
 
-    return {"senderName": "", "senderEmail": ""}
+    return None
+
+
+def _sender_from_message_body(body: dict[str, Any]) -> dict[str, str]:
+    sender = body.get("from") or {}
+    sender_address = sender.get("emailAddress") or {}
+    return {
+        "senderName": str(sender_address.get("name") or ""),
+        "senderEmail": str(sender_address.get("address") or ""),
+    }
+
+
+async def _fetch_flagged_email_senders(
+    http_client: httpx.AsyncClient, headers: dict[str, str], message_ids: list[str]
+) -> dict[str, dict[str, str]]:
+    """Resolve sender info for several messages via Graph $batch instead of one request per message."""
+    unique_ids = list(dict.fromkeys(message_ids))
+    senders: dict[str, dict[str, str]] = {}
+    batch_headers = {**headers, "Content-Type": "application/json"}
+
+    # Sequential batches: at most 20 messages per HTTP round trip, one round trip at a time.
+    for offset in range(0, len(unique_ids), _BATCH_MAX_SUBREQUESTS):
+        chunk = unique_ids[offset:offset + _BATCH_MAX_SUBREQUESTS]
+        batch_payload = {
+            "requests": [
+                {
+                    "id": message_id,
+                    "method": "GET",
+                    "url": f"/me/messages/{quote(message_id, safe='')}?$select=from",
+                }
+                for message_id in chunk
+            ]
+        }
+        try:
+            batch_response = await http_client.post(
+                "https://graph.microsoft.com/v1.0/$batch",
+                headers=batch_headers,
+                json=batch_payload,
+            )
+            batch_response.raise_for_status()
+            sub_responses = batch_response.json().get("responses", [])
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+            # The whole batch call failed; treat every message in this chunk as unresolved
+            # rather than failing the entire /actions/ request.
+            for message_id in chunk:
+                senders[message_id] = dict(_EMPTY_SENDER)
+            continue
+
+        for sub_response in sub_responses:
+            if not isinstance(sub_response, dict):
+                continue
+            message_id = sub_response.get("id")
+            if not message_id:
+                continue
+            body = sub_response.get("body")
+            if sub_response.get("status") == 200 and isinstance(body, dict):
+                senders[message_id] = _sender_from_message_body(body)
+            else:
+                senders[message_id] = dict(_EMPTY_SENDER)
+
+        # A message Graph didn't return a sub-response for is treated as failed, not dropped.
+        for message_id in chunk:
+            senders.setdefault(message_id, dict(_EMPTY_SENDER))
+
+    return senders
 
 
 @router.get("/microsoft")
@@ -203,18 +258,22 @@ async def get_microsoft_actions() -> list[dict[str, Any]]:
 
                     pending_actions.append((normalized, task, is_flagged_list))
 
-            sender_semaphore = asyncio.Semaphore(6)
-
-            async def fetch_sender(task: dict[str, Any]) -> dict[str, str]:
-                async with sender_semaphore:
-                    return await _get_flagged_email_sender(http_client, headers, task)
-
             sender_indices = [(index, task) for index, (_normalized, task, is_flagged) in enumerate(pending_actions) if is_flagged]
-            sender_results: dict[int, dict[str, str]] = {}
-            for offset in range(0, len(sender_indices), 6):
-                batch = sender_indices[offset:offset + 6]
-                results = await asyncio.gather(*(fetch_sender(task) for _index, task in batch))
-                sender_results.update({index: result for (index, _task), result in zip(batch, results)})
+            flagged_message_ids: dict[int, str] = {}
+            for index, task in sender_indices:
+                message_id = _flagged_message_id(task)
+                if message_id is not None:
+                    flagged_message_ids[index] = message_id
+
+            senders_by_message_id = await _fetch_flagged_email_senders(
+                http_client, headers, list(flagged_message_ids.values())
+            )
+            sender_results: dict[int, dict[str, str]] = {
+                index: senders_by_message_id.get(flagged_message_ids[index], dict(_EMPTY_SENDER))
+                if index in flagged_message_ids
+                else dict(_EMPTY_SENDER)
+                for index, _task in sender_indices
+            }
 
             # Fetch metadata for every pending action in one query instead of one per action.
             metadata_by_id = microsoft_metadata.get_many(

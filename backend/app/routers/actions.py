@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
@@ -16,6 +18,10 @@ from app.services import dossiers as dossier_service
 
 router = APIRouter(prefix="/actions", tags=["actions"])
 
+# TEMPORARY diagnostic timing instrumentation for GET /actions/ latency investigation.
+# Safe to remove once the dominant latency phase is confirmed from production logs.
+logger = logging.getLogger(__name__)
+
 
 GRAPH_TIMEZONE_MAP = {
     "UTC": "UTC",
@@ -26,9 +32,11 @@ GRAPH_TIMEZONE_MAP = {
 TARGET_TIMEZONE = ZoneInfo("Europe/Brussels")
 
 
-async def _get_all_todo_tasks(http_client: httpx.AsyncClient, list_id: str, headers: dict[str, str]) -> list[dict[str, Any]]:
+async def _get_all_todo_tasks(http_client: httpx.AsyncClient, list_id: str, headers: dict[str, str]) -> tuple[list[dict[str, Any]], int]:
     next_url = f"https://graph.microsoft.com/v1.0/me/todo/lists/{list_id}/tasks"
     tasks: list[dict[str, Any]] = []
+    page_count = 0
+    list_start = time.perf_counter()
 
     while next_url:
         tasks_response = await http_client.get(next_url, headers=headers)
@@ -36,8 +44,13 @@ async def _get_all_todo_tasks(http_client: httpx.AsyncClient, list_id: str, head
         tasks_payload = tasks_response.json()
         tasks.extend(tasks_payload.get("value", []))
         next_url = tasks_payload.get("@odata.nextLink")
+        page_count += 1
 
-    return tasks
+    logger.info(
+        "PERF_ACTIONS phase=list_tasks list_id=%s elapsed=%.3fs pages=%d tasks=%d",
+        list_id, time.perf_counter() - list_start, page_count, len(tasks),
+    )
+    return tasks, page_count
 
 
 def _normalize_date(value: Any) -> str:
@@ -162,6 +175,8 @@ async def _fetch_flagged_email_senders(
     unique_ids = list(dict.fromkeys(message_ids))
     senders: dict[str, dict[str, str]] = {}
     batch_headers = {**headers, "Content-Type": "application/json"}
+    phase_start = time.perf_counter()
+    batch_request_count = 0
 
     # Sequential batches: at most 20 messages per HTTP round trip, one round trip at a time.
     for offset in range(0, len(unique_ids), _BATCH_MAX_SUBREQUESTS):
@@ -176,6 +191,7 @@ async def _fetch_flagged_email_senders(
                 for message_id in chunk
             ]
         }
+        batch_request_count += 1
         try:
             batch_response = await http_client.post(
                 "https://graph.microsoft.com/v1.0/$batch",
@@ -207,39 +223,56 @@ async def _fetch_flagged_email_senders(
         for message_id in chunk:
             senders.setdefault(message_id, dict(_EMPTY_SENDER))
 
+    logger.info(
+        "PERF_ACTIONS phase=flagged_sender_batch elapsed=%.3fs message_ids=%d batch_requests=%d",
+        time.perf_counter() - phase_start, len(unique_ids), batch_request_count,
+    )
     return senders
 
 
 @router.get("/microsoft")
 async def get_microsoft_actions() -> list[dict[str, Any]]:
+    total_start = time.perf_counter()
+    token_start = time.perf_counter()
     try:
         client = MicrosoftGraphClient()
         token = client.get_access_token()
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+    finally:
+        logger.info("PERF_ACTIONS phase=token_acquisition elapsed=%.3fs", time.perf_counter() - token_start)
 
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     combined: dict[str, dict[str, Any]] = {}
 
     try:
         async with httpx.AsyncClient(timeout=20.0) as http_client:
+            lists_start = time.perf_counter()
             lists_response = await http_client.get("https://graph.microsoft.com/v1.0/me/todo/lists", headers=headers)
             lists_response.raise_for_status()
             lists_payload = lists_response.json()
+            logger.info("PERF_ACTIONS phase=todo_lists elapsed=%.3fs", time.perf_counter() - lists_start)
 
             list_items = [item for item in lists_payload.get("value", []) if item.get("id")]
             list_semaphore = asyncio.Semaphore(4)
 
-            async def fetch_list_tasks(list_item: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+            async def fetch_list_tasks(list_item: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], int]:
                 async with list_semaphore:
-                    return list_item, await _get_all_todo_tasks(http_client, list_item["id"], headers)
+                    tasks, page_count = await _get_all_todo_tasks(http_client, list_item["id"], headers)
+                    return list_item, tasks, page_count
 
-            fetched_lists: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+            tasks_phase_start = time.perf_counter()
+            fetched_lists: list[tuple[dict[str, Any], list[dict[str, Any]], int]] = []
             for offset in range(0, len(list_items), 4):
                 fetched_lists.extend(await asyncio.gather(*(fetch_list_tasks(item) for item in list_items[offset:offset + 4])))
+            total_task_pages = sum(page_count for _list_item, _tasks, page_count in fetched_lists)
+            logger.info(
+                "PERF_ACTIONS phase=task_retrieval elapsed=%.3fs lists=%d task_page_requests=%d",
+                time.perf_counter() - tasks_phase_start, len(list_items), total_task_pages,
+            )
 
             pending_actions: list[tuple[dict[str, Any], dict[str, Any], bool]] = []
-            for list_item, tasks in fetched_lists:
+            for list_item, tasks, _page_count in fetched_lists:
                 list_id = list_item.get("id")
                 if not list_id:
                     continue
@@ -276,10 +309,16 @@ async def get_microsoft_actions() -> list[dict[str, Any]]:
             }
 
             # Fetch metadata for every pending action in one query instead of one per action.
+            metadata_start = time.perf_counter()
             metadata_by_id = microsoft_metadata.get_many(
                 normalized["id"] for normalized, _task, _is_flagged in pending_actions
             )
+            logger.info(
+                "PERF_ACTIONS phase=metadata_get_many elapsed=%.3fs pending_actions=%d",
+                time.perf_counter() - metadata_start, len(pending_actions),
+            )
 
+            merge_start = time.perf_counter()
             for index, (normalized, _task, _is_flagged) in enumerate(pending_actions):
                 if index in sender_results:
                     normalized.update(sender_results[index])
@@ -292,11 +331,17 @@ async def get_microsoft_actions() -> list[dict[str, Any]]:
                 normalized["actionType"] = meta.get("action_type") or normalized.get("actionType") or ""
 
                 combined.setdefault(normalized["id"], normalized)
+            logger.info(
+                "PERF_ACTIONS phase=normalize_merge elapsed=%.3fs items=%d",
+                time.perf_counter() - merge_start, len(combined),
+            )
 
     except httpx.HTTPStatusError as exc:
         raise HTTPException(status_code=exc.response.status_code, detail="Microsoft Graph request failed while collecting actions.") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        logger.info("PERF_ACTIONS phase=get_microsoft_actions_total elapsed=%.3fs", time.perf_counter() - total_start)
 
     return list(combined.values())
 
@@ -403,59 +448,87 @@ async def delete_manual_action(action_id: str) -> dict[str, Any]:
 
 @router.get("/")
 async def get_all_actions() -> list[dict[str, Any]]:
+    total_start = time.perf_counter()
     # combined: manual actions + microsoft actions
     combined: dict[str, dict[str, Any]] = {}
 
-    # add manual first so manual items are present even if ids overlap
     try:
-        manual_list = manual_actions.get_all()
-        for r in manual_list:
-            normalized = {
-                "id": r.get("id", ""),
-                "title": r.get("title", ""),
-                "source": r.get("source", "Command Center"),
-                "status": r.get("status", "Open"),
-                "priority": r.get("priority", "Normaal"),
-                "dueDate": r.get("dueDate", ""),
-                "createdDate": r.get("createdDate", ""),
-                "lastModifiedDate": r.get("lastModifiedDate", ""),
-                "customer": r.get("customer", ""),
-                "contact": r.get("contact", ""),
-                "notes": r.get("notes", ""),
-                "webLink": "",
-                "microsoftList": "",
-            }
-            if normalized["id"]:
-                combined.setdefault(normalized["id"], normalized)
-    except Exception:
-        # ignore DB errors here and continue to return Microsoft actions
-        pass
+        # add manual first so manual items are present even if ids overlap
+        manual_start = time.perf_counter()
+        try:
+            manual_list = manual_actions.get_all()
+            for r in manual_list:
+                normalized = {
+                    "id": r.get("id", ""),
+                    "title": r.get("title", ""),
+                    "source": r.get("source", "Command Center"),
+                    "status": r.get("status", "Open"),
+                    "priority": r.get("priority", "Normaal"),
+                    "dueDate": r.get("dueDate", ""),
+                    "createdDate": r.get("createdDate", ""),
+                    "lastModifiedDate": r.get("lastModifiedDate", ""),
+                    "customer": r.get("customer", ""),
+                    "contact": r.get("contact", ""),
+                    "notes": r.get("notes", ""),
+                    "webLink": "",
+                    "microsoftList": "",
+                }
+                if normalized["id"]:
+                    combined.setdefault(normalized["id"], normalized)
+        except Exception:
+            # ignore DB errors here and continue to return Microsoft actions
+            pass
+        logger.info(
+            "PERF_ACTIONS phase=manual_actions_get_all elapsed=%.3fs items=%d",
+            time.perf_counter() - manual_start, len(combined),
+        )
 
-    # fetch microsoft actions and merge
-    try:
-        ms_actions = await get_microsoft_actions()
-        for a in ms_actions:
-            # get_microsoft_actions() already merges microsoft_metadata for each action.
-            if a.get("id"):
-                combined.setdefault(a.get("id"), a)
-    except HTTPException:
-        # propagate microsoft errors
-        raise
-    except Exception:
-        # ignore other errors and return manual only
-        pass
+        # fetch microsoft actions and merge
+        ms_start = time.perf_counter()
+        ms_action_count = 0
+        try:
+            ms_actions = await get_microsoft_actions()
+            ms_action_count = len(ms_actions)
+            for a in ms_actions:
+                # get_microsoft_actions() already merges microsoft_metadata for each action.
+                if a.get("id"):
+                    combined.setdefault(a.get("id"), a)
+        except HTTPException:
+            # propagate microsoft errors
+            raise
+        except Exception:
+            # ignore other errors and return manual only
+            pass
+        finally:
+            logger.info(
+                "PERF_ACTIONS phase=get_microsoft_actions_call elapsed=%.3fs ms_actions=%d",
+                time.perf_counter() - ms_start, ms_action_count,
+            )
 
-    # add active dossiers as normalized actions
-    try:
-        ds = dossier_service.get_for_actions()
-        for d in ds:
-            if d.get("id"):
-                combined.setdefault(d.get("id"), d)
-    except Exception:
-        # ignore dossier errors
-        pass
+        # add active dossiers as normalized actions
+        dossier_start = time.perf_counter()
+        try:
+            ds = dossier_service.get_for_actions()
+            for d in ds:
+                if d.get("id"):
+                    combined.setdefault(d.get("id"), d)
+        except Exception:
+            # ignore dossier errors
+            pass
+        logger.info(
+            "PERF_ACTIONS phase=dossier_get_for_actions elapsed=%.3fs items=%d",
+            time.perf_counter() - dossier_start, len(combined),
+        )
 
-    return list(combined.values())
+        response_start = time.perf_counter()
+        result = list(combined.values())
+        logger.info(
+            "PERF_ACTIONS phase=response_prepare elapsed=%.3fs items=%d",
+            time.perf_counter() - response_start, len(result),
+        )
+        return result
+    finally:
+        logger.info("PERF_ACTIONS phase=get_all_actions_total elapsed=%.3fs", time.perf_counter() - total_start)
 
 
 @router.put("/microsoft/{action_id}")

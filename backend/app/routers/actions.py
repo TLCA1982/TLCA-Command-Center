@@ -46,7 +46,7 @@ async def _get_all_todo_tasks(http_client: httpx.AsyncClient, list_id: str, head
         next_url = tasks_payload.get("@odata.nextLink")
         page_count += 1
 
-    logger.info(
+    logger.warning(
         "PERF_ACTIONS phase=list_tasks list_id=%s elapsed=%.3fs pages=%d tasks=%d",
         list_id, time.perf_counter() - list_start, page_count, len(tasks),
     )
@@ -223,7 +223,7 @@ async def _fetch_flagged_email_senders(
         for message_id in chunk:
             senders.setdefault(message_id, dict(_EMPTY_SENDER))
 
-    logger.info(
+    logger.warning(
         "PERF_ACTIONS phase=flagged_sender_batch elapsed=%.3fs message_ids=%d batch_requests=%d",
         time.perf_counter() - phase_start, len(unique_ids), batch_request_count,
     )
@@ -240,7 +240,7 @@ async def get_microsoft_actions() -> list[dict[str, Any]]:
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     finally:
-        logger.info("PERF_ACTIONS phase=token_acquisition elapsed=%.3fs", time.perf_counter() - token_start)
+        logger.warning("PERF_ACTIONS phase=token_acquisition elapsed=%.3fs", time.perf_counter() - token_start)
 
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     combined: dict[str, dict[str, Any]] = {}
@@ -251,7 +251,7 @@ async def get_microsoft_actions() -> list[dict[str, Any]]:
             lists_response = await http_client.get("https://graph.microsoft.com/v1.0/me/todo/lists", headers=headers)
             lists_response.raise_for_status()
             lists_payload = lists_response.json()
-            logger.info("PERF_ACTIONS phase=todo_lists elapsed=%.3fs", time.perf_counter() - lists_start)
+            logger.warning("PERF_ACTIONS phase=todo_lists elapsed=%.3fs", time.perf_counter() - lists_start)
 
             list_items = [item for item in lists_payload.get("value", []) if item.get("id")]
             list_semaphore = asyncio.Semaphore(4)
@@ -266,7 +266,7 @@ async def get_microsoft_actions() -> list[dict[str, Any]]:
             for offset in range(0, len(list_items), 4):
                 fetched_lists.extend(await asyncio.gather(*(fetch_list_tasks(item) for item in list_items[offset:offset + 4])))
             total_task_pages = sum(page_count for _list_item, _tasks, page_count in fetched_lists)
-            logger.info(
+            logger.warning(
                 "PERF_ACTIONS phase=task_retrieval elapsed=%.3fs lists=%d task_page_requests=%d",
                 time.perf_counter() - tasks_phase_start, len(list_items), total_task_pages,
             )
@@ -313,7 +313,7 @@ async def get_microsoft_actions() -> list[dict[str, Any]]:
             metadata_by_id = microsoft_metadata.get_many(
                 normalized["id"] for normalized, _task, _is_flagged in pending_actions
             )
-            logger.info(
+            logger.warning(
                 "PERF_ACTIONS phase=metadata_get_many elapsed=%.3fs pending_actions=%d",
                 time.perf_counter() - metadata_start, len(pending_actions),
             )
@@ -331,7 +331,7 @@ async def get_microsoft_actions() -> list[dict[str, Any]]:
                 normalized["actionType"] = meta.get("action_type") or normalized.get("actionType") or ""
 
                 combined.setdefault(normalized["id"], normalized)
-            logger.info(
+            logger.warning(
                 "PERF_ACTIONS phase=normalize_merge elapsed=%.3fs items=%d",
                 time.perf_counter() - merge_start, len(combined),
             )
@@ -341,7 +341,7 @@ async def get_microsoft_actions() -> list[dict[str, Any]]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
-        logger.info("PERF_ACTIONS phase=get_microsoft_actions_total elapsed=%.3fs", time.perf_counter() - total_start)
+        logger.warning("PERF_ACTIONS phase=get_microsoft_actions_total elapsed=%.3fs", time.perf_counter() - total_start)
 
     return list(combined.values())
 
@@ -478,7 +478,7 @@ async def get_all_actions() -> list[dict[str, Any]]:
         except Exception:
             # ignore DB errors here and continue to return Microsoft actions
             pass
-        logger.info(
+        logger.warning(
             "PERF_ACTIONS phase=manual_actions_get_all elapsed=%.3fs items=%d",
             time.perf_counter() - manual_start, len(combined),
         )
@@ -500,7 +500,7 @@ async def get_all_actions() -> list[dict[str, Any]]:
             # ignore other errors and return manual only
             pass
         finally:
-            logger.info(
+            logger.warning(
                 "PERF_ACTIONS phase=get_microsoft_actions_call elapsed=%.3fs ms_actions=%d",
                 time.perf_counter() - ms_start, ms_action_count,
             )
@@ -515,20 +515,20 @@ async def get_all_actions() -> list[dict[str, Any]]:
         except Exception:
             # ignore dossier errors
             pass
-        logger.info(
+        logger.warning(
             "PERF_ACTIONS phase=dossier_get_for_actions elapsed=%.3fs items=%d",
             time.perf_counter() - dossier_start, len(combined),
         )
 
         response_start = time.perf_counter()
         result = list(combined.values())
-        logger.info(
+        logger.warning(
             "PERF_ACTIONS phase=response_prepare elapsed=%.3fs items=%d",
             time.perf_counter() - response_start, len(result),
         )
         return result
     finally:
-        logger.info("PERF_ACTIONS phase=get_all_actions_total elapsed=%.3fs", time.perf_counter() - total_start)
+        logger.warning("PERF_ACTIONS phase=get_all_actions_total elapsed=%.3fs", time.perf_counter() - total_start)
 
 
 @router.put("/microsoft/{action_id}")

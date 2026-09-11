@@ -81,9 +81,11 @@ async def update_contact(company_id: str, contact_id: str, payload: dict[str, An
 @router.delete("/{company_id}/contacts/{contact_id}")
 async def delete_contact(company_id: str, contact_id: str) -> dict[str, bool]:
     try:
-        deleted = company_service.delete_contact(company_id, contact_id)
+        deleted = await company_service.delete_contact(company_id, contact_id)
     except company_service.ContactPersonInUseError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except company_service.OutlookContactDeletionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="Contact person not found for this company")
     return {"deleted": True}

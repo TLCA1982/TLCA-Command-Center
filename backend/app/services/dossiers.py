@@ -14,6 +14,10 @@ _get_conn = get_conn
 def _ensure_tables() -> None:
     if is_postgresql():
         require_tables(("dossiers", "dossier_events"))
+        with _get_conn() as conn:
+            if not has_column(conn, "dossier_events", "updated_at"):
+                conn.execute("ALTER TABLE dossier_events ADD COLUMN updated_at TEXT")
+                conn.commit()
         return
 
     with _get_conn() as conn:

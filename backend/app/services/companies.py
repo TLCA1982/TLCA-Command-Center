@@ -10,8 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from app.db import DB_PATH, get_conn, has_column, is_sqlite
 from app.config import get_settings
-from app.services.microsoft_graph import MicrosoftGraphClient
-
+from app.services import contact_sync_state
 from app.services.microsoft_graph import MicrosoftGraphClient
 
 
@@ -26,6 +25,10 @@ class OutlookContactCreationError(ValueError):
     def __init__(self, contact: Dict[str, Any], reason: str) -> None:
         super().__init__(reason)
         self.contact = contact
+
+
+class OutlookContactDeletionError(ValueError):
+    """Raised when a linked Outlook contact could not be deleted via Microsoft Graph."""
 
 
 class LinkedContactSyncError(ValueError):
@@ -722,6 +725,7 @@ def compare_linked_outlook_contacts(outlook_contacts: list[Dict[str, Any]]) -> D
                 "outlook_email": None,
                 "outlook_phone": None,
                 "outlook_categories": [],
+                "outlook_last_modified": None,
                 "differences": ["outlook_contact"],
                 "status": "outlook_contact_missing",
             })
@@ -770,16 +774,34 @@ def compare_linked_outlook_contacts(outlook_contacts: list[Dict[str, Any]]) -> D
             "local_mobile_phone": row["mobile_phone"],
             "outlook_mobile_phone": values["mobile_phone"][1],
             "outlook_categories": categories,
+            "outlook_last_modified": outlook.get("lastModifiedDateTime"),
             "differences": differences,
             "status": status,
         })
     return {"summary": summary, "contacts": comparisons}
 
 
-def build_linked_sync_plan(comparisons: list[Dict[str, Any]]) -> Dict[str, Any]:
-    """Build a dynamic Command Center-authoritative plan from linked comparisons."""
+_SYNCED_FIELDS = (("name", normalize), ("company", normalize), ("email", normalize), ("phone", normalize_phone), ("mobile_phone", normalize_phone))
+
+
+def build_linked_sync_plan(
+    comparisons: list[Dict[str, Any]],
+    baselines: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Build a per-field two-way sync plan using a three-way (baseline/local/outlook) comparison.
+
+    A contact with no baseline row yet (first sync) keeps the previous
+    Command-Center-wins behavior for that one run, after which a baseline is
+    recorded so later runs can detect which side actually changed.
+    """
+    baselines = baselines or {}
     outlook_updates: Dict[str, Dict[str, str]] = {}
     local_updates: Dict[str, Dict[str, str]] = {}
+    skipped_contacts: list[Dict[str, Any]] = []
+    missing_contacts: list[Dict[str, Any]] = []
+    conflicts: list[Dict[str, Any]] = []
+    baseline_updates: Dict[str, Dict[str, Any]] = {}
+    first_sync_contacts: list[str] = []
     field_counts = {
         "name_to_outlook": 0, "name_to_command_center": 0,
         "company_to_outlook": 0, "company_to_command_center": 0,
@@ -788,7 +810,23 @@ def build_linked_sync_plan(comparisons: list[Dict[str, Any]]) -> Dict[str, Any]:
         "mobile_phone_to_outlook": 0, "mobile_phone_to_command_center": 0,
     }
     for contact in comparisons:
-        if contact.get("status") != "linked_ok":
+        status = contact.get("status")
+        if status == "category_no_longer_allowed":
+            # Contact still exists in Outlook with a disallowed category; leave it linked as-is.
+            skipped_contacts.append({
+                "local_contact_id": contact.get("local_contact_id"),
+                "outlook_contact_id": contact.get("outlook_contact_id"),
+                "reason": status,
+            })
+            continue
+        if status == "outlook_contact_missing":
+            # Graph confirmed (404) the contact no longer exists; queue the local row for deletion.
+            missing_contacts.append({
+                "local_contact_id": contact.get("local_contact_id"),
+                "outlook_contact_id": contact.get("outlook_contact_id"),
+            })
+            continue
+        if status != "linked_ok":
             raise LinkedContactSyncError(
                 f"Cannot synchronize linked contacts with status {contact.get('status')}"
             )
@@ -796,22 +834,74 @@ def build_linked_sync_plan(comparisons: list[Dict[str, Any]]) -> Dict[str, Any]:
         outlook_id = contact["outlook_contact_id"]
         if not local_id or not outlook_id:
             raise LinkedContactSyncError("Cannot synchronize a linked contact with a missing ID")
-        for field, normalizer in (("name", normalize), ("company", normalize), ("email", normalize), ("phone", normalize_phone), ("mobile_phone", normalize_phone)):
+
+        baseline = baselines.get(local_id)
+        is_first_sync = baseline is None
+        if is_first_sync:
+            first_sync_contacts.append(local_id)
+
+        merged_values: Dict[str, str] = {}
+        for field, normalizer in _SYNCED_FIELDS:
             local_value = contact.get(f"local_{field}") or ""
             outlook_value = contact.get(f"outlook_{field}") or ""
             local_normalized = normalizer(local_value)
             outlook_normalized = normalizer(outlook_value)
-            if local_normalized and local_normalized != outlook_normalized:
-                outlook_updates.setdefault(outlook_id, {})[field] = local_value
-                field_counts[f"{field}_to_outlook"] += 1
-            elif not local_normalized and outlook_normalized:
+
+            if local_normalized == outlook_normalized:
+                merged_values[field] = local_value or outlook_value
+                continue
+
+            if is_first_sync:
+                if local_normalized:
+                    outlook_updates.setdefault(outlook_id, {})[field] = local_value
+                    field_counts[f"{field}_to_outlook"] += 1
+                    merged_values[field] = local_value
+                else:
+                    local_updates.setdefault(local_id, {})[field] = outlook_value
+                    field_counts[f"{field}_to_command_center"] += 1
+                    merged_values[field] = outlook_value
+                continue
+
+            baseline_normalized = normalizer(baseline.get(f"synced_{field}") or "")
+            if baseline_normalized == local_normalized:
+                # Only Outlook changed since the last sync.
                 local_updates.setdefault(local_id, {})[field] = outlook_value
                 field_counts[f"{field}_to_command_center"] += 1
+                merged_values[field] = outlook_value
+            elif baseline_normalized == outlook_normalized:
+                # Only Command Center changed since the last sync.
+                outlook_updates.setdefault(outlook_id, {})[field] = local_value
+                field_counts[f"{field}_to_outlook"] += 1
+                merged_values[field] = local_value
+            else:
+                # Both sides changed differently since the last sync: do not overwrite either.
+                conflicts.append({
+                    "local_contact_id": local_id,
+                    "outlook_contact_id": outlook_id,
+                    "field": field,
+                    "local_value": local_value,
+                    "outlook_value": outlook_value,
+                    "baseline_value": baseline.get(f"synced_{field}") or "",
+                })
+                # Keep the stale baseline for this field so the conflict is reported again
+                # next sync until it is resolved manually on one of the two sides.
+                merged_values[field] = baseline.get(f"synced_{field}") or ""
+
+        baseline_updates[local_id] = {
+            "outlook_contact_id": outlook_id,
+            "outlook_last_modified": contact.get("outlook_last_modified") or "",
+            "values": merged_values,
+        }
     return {
         "linked_contacts": len(comparisons),
         "outlook_updates": outlook_updates,
         "local_updates": local_updates,
         "field_counts": field_counts,
+        "skipped_contacts": skipped_contacts,
+        "missing_contacts": missing_contacts,
+        "conflicts": conflicts,
+        "baseline_updates": baseline_updates,
+        "first_sync_contacts": first_sync_contacts,
     }
 
 
@@ -829,6 +919,12 @@ def _outlook_patch(fields: Dict[str, str]) -> Dict[str, Any]:
         elif field == "mobile_phone":
             patch["mobilePhone"] = value
     return patch
+
+
+def _default_outlook_business_category() -> str:
+    """Category automatically applied to Outlook contacts created from Command Center."""
+    categories = get_settings().outlook_business_category_list
+    return categories[0] if categories else "Klant/Prospect"
 
 
 def _backup_database() -> Path:
@@ -866,7 +962,8 @@ async def synchronize_linked_outlook_contacts(graph_client: Any) -> Dict[str, An
     }
     if len(preview_links) != len(linked_ids) or set(preview_links.values()) != set(linked_ids):
         raise LinkedContactSyncError("Synchronization aborted: linked Outlook ID mapping is incomplete or inconsistent")
-    plan = build_linked_sync_plan(contacts)
+    baselines = contact_sync_state.get_many(preview_links.keys())
+    plan = build_linked_sync_plan(contacts, baselines)
     outlook_originals = {contact["outlook_contact_id"]: contact for contact in contacts}
     graph_changed: list[str] = []
     try:
@@ -878,6 +975,7 @@ async def synchronize_linked_outlook_contacts(graph_client: Any) -> Dict[str, An
         # exception, so this block is transactional on both SQLite and
         # PostgreSQL without any backend-specific connection handling.
         with _get_conn() as conn:
+            now = datetime.utcnow().isoformat()
             for local_id, fields in plan["local_updates"].items():
                 contact_row = conn.execute(
                     "SELECT company_id FROM contact_persons WHERE id = :id AND outlook_contact_id IS NOT NULL",
@@ -894,21 +992,42 @@ async def synchronize_linked_outlook_contacts(graph_client: Any) -> Dict[str, An
                         if duplicate is not None:
                             raise LinkedContactSyncError(f"Company update for contact {local_id} would create a duplicate company")
                         cursor = conn.execute(
-                            "UPDATE companies SET name = :name, normalized_name = :normalized_name WHERE id = :company_id",
-                            {"name": value, "normalized_name": normalize(value), "company_id": contact_row["company_id"]},
+                            "UPDATE companies SET name = :name, normalized_name = :normalized_name, updated_at = :updated_at WHERE id = :company_id",
+                            {"name": value, "normalized_name": normalize(value), "updated_at": now, "company_id": contact_row["company_id"]},
                         )
                     else:
                         cursor = conn.execute(
-                            f"UPDATE contact_persons SET {field} = :value WHERE id = :id AND outlook_contact_id IS NOT NULL",
-                            {"value": value, "id": local_id},
+                            f"UPDATE contact_persons SET {field} = :value, updated_at = :updated_at WHERE id = :id AND outlook_contact_id IS NOT NULL",
+                            {"value": value, "updated_at": now, "id": local_id},
                         )
                     if cursor.rowcount != 1:
                         raise LinkedContactSyncError(f"Local update failed for contact {local_id}")
+
+            # Contacts Graph reported as gone (404): delete the local row too, unless
+            # existing history-protection rules block it, in which case report a conflict
+            # and keep going instead of aborting the rest of the sync.
+            deleted_missing_contacts: list[Dict[str, Any]] = []
+            deletion_conflicts: list[Dict[str, Any]] = []
+            for missing in plan["missing_contacts"]:
+                local_id = missing["local_contact_id"]
+                outlook_id = missing["outlook_contact_id"]
+                try:
+                    _delete_local_contact_row(conn, local_id)
+                    contact_sync_state.delete(local_id, connection=conn)
+                    deleted_missing_contacts.append({"local_contact_id": local_id, "outlook_contact_id": outlook_id})
+                except ContactPersonInUseError as exc:
+                    deletion_conflicts.append({"local_contact_id": local_id, "outlook_contact_id": outlook_id, "reason": str(exc)})
+
+            deleted_local_ids = {item["local_contact_id"] for item in deleted_missing_contacts}
             links = {
                 row["id"]: row["outlook_contact_id"]
                 for row in conn.execute("SELECT id, outlook_contact_id FROM contact_persons WHERE outlook_contact_id IS NOT NULL")
             }
-            expected_links = {contact["local_contact_id"]: contact["outlook_contact_id"] for contact in contacts}
+            expected_links = {
+                contact["local_contact_id"]: contact["outlook_contact_id"]
+                for contact in contacts
+                if contact["local_contact_id"] not in deleted_local_ids
+            }
             if any(links.get(local_id) != outlook_id for local_id, outlook_id in expected_links.items()):
                 raise LinkedContactSyncError("Local link integrity validation failed")
             duplicate_count = conn.execute(
@@ -919,6 +1038,20 @@ async def synchronize_linked_outlook_contacts(graph_client: Any) -> Dict[str, An
             ).fetchone()[0]
             if duplicate_count != 0:
                 raise LinkedContactSyncError("Duplicate linked Outlook IDs detected")
+
+            # Record the post-sync baseline for every contact that was actually compared,
+            # so the next run can tell which side changed since this sync.
+            for local_id, baseline_update in plan["baseline_updates"].items():
+                if local_id in deleted_local_ids:
+                    continue
+                contact_sync_state.upsert(
+                    local_id,
+                    baseline_update["outlook_contact_id"],
+                    baseline_update["values"],
+                    baseline_update["outlook_last_modified"],
+                    connection=conn,
+                    synced_at=now,
+                )
     except Exception as exc:
         compensation_complete = True
         for outlook_id in graph_changed:
@@ -946,6 +1079,11 @@ async def synchronize_linked_outlook_contacts(graph_client: Any) -> Dict[str, An
         "outlook_contacts_updated": len(plan["outlook_updates"]),
         "command_center_contacts_updated": len(plan["local_updates"]),
         "field_updates": plan["field_counts"],
+        "skipped_contacts": plan["skipped_contacts"],
+        "deleted_local_contacts": deleted_missing_contacts,
+        "deletion_conflicts": deletion_conflicts,
+        "conflicts": plan["conflicts"],
+        "first_sync_contacts": plan["first_sync_contacts"],
     }
 
 
@@ -1060,6 +1198,7 @@ def create_contact(company_id: str, payload: Dict[str, Any]) -> Optional[Dict[st
             "emailAddresses": ([{"address": saved_contact["email"]}] if saved_contact["email"] else []),
             "businessPhones": ([saved_contact["phone"]] if saved_contact["phone"] else []),
             "mobilePhone": saved_contact["mobile_phone"] or "",
+            "categories": [_default_outlook_business_category()],
         }
         try:
             outlook_contact = MicrosoftGraphClient().create_contact(outlook_payload)
@@ -1117,22 +1256,41 @@ def update_contact(company_id: str, contact_id: str, payload: Dict[str, Any]) ->
         return _get_contact(conn, company_id, contact_id)
 
 
-def delete_contact(company_id: str, contact_id: str) -> bool:
+def _delete_local_contact_row(conn: Any, contact_id: str) -> None:
+    """Delete a contact_persons row after enforcing history-protection rules."""
+    dossier_event = conn.execute(
+        "SELECT 1 FROM dossier_events WHERE contact_person_id = :contact_id LIMIT 1",
+        {"contact_id": contact_id},
+    ).fetchone()
+    if dossier_event is not None:
+        raise ContactPersonInUseError(
+            "Contact person cannot be deleted because it is used in contact-moment history"
+        )
+    conn.execute(
+        "UPDATE dossiers SET primary_contact_person_id = NULL WHERE primary_contact_person_id = :contact_id",
+        {"contact_id": contact_id},
+    )
+    conn.execute("DELETE FROM contact_persons WHERE id = :id", {"id": contact_id})
+
+
+async def delete_contact(company_id: str, contact_id: str) -> bool:
     with _get_conn() as conn:
         contact = _get_contact(conn, company_id, contact_id)
         if contact is None:
             return False
-        dossier_event = conn.execute(
-            "SELECT 1 FROM dossier_events WHERE contact_person_id = :contact_id LIMIT 1",
-            {"contact_id": contact_id},
-        ).fetchone()
-        if dossier_event is not None:
-            raise ContactPersonInUseError(
-                "Contact person cannot be deleted because it is used in contact-moment history"
-            )
-        conn.execute(
-            "UPDATE dossiers SET primary_contact_person_id = NULL WHERE primary_contact_person_id = :contact_id",
-            {"contact_id": contact_id},
-        )
-        conn.execute("DELETE FROM contact_persons WHERE id = :id AND company_id = :company_id", {"id": contact_id, "company_id": company_id})
+        outlook_id = contact.get("outlook_contact_id")
+
+    # Delete the linked Outlook contact before touching local data. Only proceed
+    # to the local delete once Graph confirms the contact is gone (or already was),
+    # so a failed Outlook deletion never leaves the two systems silently out of sync.
+    if outlook_id:
+        try:
+            await MicrosoftGraphClient().delete_contact(outlook_id)
+        except Exception as exc:
+            raise OutlookContactDeletionError(
+                f"Contact '{contact['name']}' was not deleted because removing the linked Outlook contact failed: {exc}"
+            ) from exc
+
+    with _get_conn() as conn:
+        _delete_local_contact_row(conn, contact_id)
     return True

@@ -9,3 +9,8 @@ __pycache__/
 *msal*token*cache*
 database/actions.db
 backups/*.db
+
+azure-logs*/
+azure-logs*.zip
+
+*.zip

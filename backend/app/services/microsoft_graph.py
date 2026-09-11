@@ -150,7 +150,7 @@ class MicrosoftGraphClient:
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         url = (
             "https://graph.microsoft.com/v1.0/me/contacts/"
-            f"{contact_id}?$select=id,displayName,givenName,surname,companyName,emailAddresses,businessPhones,mobilePhone,categories"
+            f"{contact_id}?$select=id,displayName,givenName,surname,companyName,emailAddresses,businessPhones,mobilePhone,categories,lastModifiedDateTime"
         )
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.get(url, headers=headers)
@@ -167,6 +167,17 @@ class MicrosoftGraphClient:
             response = await client.patch(url, headers=headers, json=payload)
             response.raise_for_status()
             return response.json() if response.content else {}
+
+    async def delete_contact(self, contact_id: str) -> None:
+        """Delete an Outlook contact. A 404 is treated as already deleted (idempotent)."""
+        token = self.get_access_token()
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        url = f"https://graph.microsoft.com/v1.0/me/contacts/{quote(contact_id, safe='')}"
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.delete(url, headers=headers)
+            if response.status_code == 404:
+                return
+            response.raise_for_status()
 
     async def get_contacts_for_categories(self, categories: list[str]) -> list[dict[str, Any]]:
         token = self.get_access_token()

@@ -33,6 +33,7 @@ EXPECTED_TABLES = {
     "manual_actions",
     "microsoft_metadata",
     "communicator_import_rows",
+    "contact_sync_state",
 }
 
 
@@ -183,6 +184,7 @@ dossier_events = Table(
     Column("follow_up_date", Text),
     Column("status_change", Text),
     Column("created_at", Text),
+    Column("updated_at", Text),
     Column("contact_person_id", Text),
 )
 
@@ -207,6 +209,20 @@ communicator_import_rows = Table(
     Column("dossier_id", Text, nullable=False),
     Column("event_ids", Text, nullable=False),
     Column("imported_at", Text, nullable=False),
+)
+
+contact_sync_state = Table(
+    "contact_sync_state",
+    metadata,
+    Column("local_contact_id", Text, primary_key=True),
+    Column("outlook_contact_id", Text, nullable=True),
+    Column("last_synced_at", Text, nullable=True),
+    Column("synced_name", Text, nullable=True),
+    Column("synced_company", Text, nullable=True),
+    Column("synced_email", Text, nullable=True),
+    Column("synced_phone", Text, nullable=True),
+    Column("synced_mobile_phone", Text, nullable=True),
+    Column("outlook_last_modified", Text, nullable=True),
 )
 
 Index(

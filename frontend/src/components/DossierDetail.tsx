@@ -15,7 +15,8 @@ const ContactSummary = ({ contact }: { contact: any }) => (
     <strong>{contact.name} {isPrimaryContact(contact) && <span className="contact-badge contact-badge--primary">Primair</span>} {!contact.is_active && <span className="contact-badge contact-badge--inactive">Inactief</span>}</strong>
     {contact.job_title && <span>{contact.job_title}</span>}
     {contact.email && <span>{contact.email}</span>}
-    {contact.phone && <span>{contact.phone}</span>}
+    {contact.phone && <span style={{ whiteSpace: 'pre-line' }}>Werk: {contact.phone}</span>}
+    {contact.home_phone && <span style={{ whiteSpace: 'pre-line' }}>Thuis: {contact.home_phone}</span>}
     {contact.mobile_phone && <span>{contact.mobile_phone}</span>}
   </div>
 )

@@ -7,6 +7,7 @@ type Props = {
   allowOutlook?: boolean
   onClose: () => void
   onSaved: (contact?: any) => void
+  prepareOnly?: boolean
 }
 
 const toBoolean = (value: unknown, fallback: boolean) => {
@@ -16,7 +17,7 @@ const toBoolean = (value: unknown, fallback: boolean) => {
   return fallback
 }
 
-const ContactPersonModal = ({ companyId, contact, allowOutlook = false, onClose, onSaved }: Props) => {
+const ContactPersonModal = ({ companyId, contact, allowOutlook = false, onClose, onSaved, prepareOnly = false }: Props) => {
   const [fields, setFields] = useState({
     name: contact?.name ?? '',
     email: contact?.email ?? '',
@@ -29,12 +30,17 @@ const ContactPersonModal = ({ companyId, contact, allowOutlook = false, onClose,
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [addToOutlook, setAddToOutlook] = useState(false)
+  const [addToOutlook, setAddToOutlook] = useState(contact?.add_to_outlook ?? false)
   const setField = (field: string, value: string | boolean) => setFields((current) => ({ ...current, [field]: value }))
 
   const save = async () => {
     if (!fields.name.trim()) {
       setError('Naam is verplicht')
+      return
+    }
+    if (prepareOnly) {
+      onSaved({ ...fields, add_to_outlook: addToOutlook })
+      onClose()
       return
     }
     setSaving(true)
@@ -65,16 +71,17 @@ const ContactPersonModal = ({ companyId, contact, allowOutlook = false, onClose,
         <label>Naam<input value={fields.name} onChange={(e) => setField('name', e.target.value)} /></label>
         <label>Functie<input value={fields.job_title} onChange={(e) => setField('job_title', e.target.value)} /></label>
         <label>E-mail<input type="email" value={fields.email} onChange={(e) => setField('email', e.target.value)} /></label>
-        <label>Werktelefoon<textarea value={fields.phone} onChange={(e) => setField('phone', e.target.value)} placeholder="Eén nummer per regel" rows={2} /></label>
-        <label>Thuistelefoon<textarea value={fields.home_phone} onChange={(e) => setField('home_phone', e.target.value)} placeholder="Eén nummer per regel" rows={2} /></label>
+        <label>Werktelefoon<textarea value={fields.phone} onChange={(e) => setField('phone', e.target.value)} placeholder="EÃ©n nummer per regel" rows={2} /></label>
+        <label>Thuistelefoon<textarea value={fields.home_phone} onChange={(e) => setField('home_phone', e.target.value)} placeholder="EÃ©n nummer per regel" rows={2} /></label>
         <label>Mobiel<input value={fields.mobile_phone} onChange={(e) => setField('mobile_phone', e.target.value)} /></label>
         <label className="checkbox-field"><input type="checkbox" checked={fields.is_active} onChange={(e) => setFields((current) => ({ ...current, is_active: e.target.checked, is_primary: e.target.checked && current.is_primary }))} />Actief</label>
         <label className="checkbox-field"><input type="checkbox" checked={fields.is_primary} disabled={!fields.is_active} onChange={(e) => setField('is_primary', e.target.checked)} />Primair contact</label>
-        {allowOutlook && !contact && <label className="checkbox-field"><input type="checkbox" checked={addToOutlook} onChange={(e) => setAddToOutlook(e.target.checked)} />Ook toevoegen aan Outlook</label>}
+        {allowOutlook && (!contact || prepareOnly) && <label className="checkbox-field"><input type="checkbox" checked={addToOutlook} onChange={(e) => setAddToOutlook(e.target.checked)} />Ook toevoegen aan Outlook</label>}
+        {prepareOnly && <p>Deze contactpersoon wordt opgeslagen wanneer je het bedrijf opslaat.</p>}
         {error && <p className="form-error">{error}</p>}
         <div className="modal-actions">
           <button type="button" onClick={onClose} disabled={saving}>Annuleren</button>
-          <button type="button" onClick={save} disabled={saving} className="action-btn action-btn--primary">Opslaan</button>
+          <button type="button" onClick={save} disabled={saving} className="action-btn action-btn--primary">{prepareOnly ? 'Toevoegen aan bedrijf' : 'Opslaan'}</button>
         </div>
       </div>
     </div>

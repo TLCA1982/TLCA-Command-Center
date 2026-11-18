@@ -5,7 +5,7 @@ import ActionTable from '../components/ActionTable'
 import ManualActionModal from '../components/ManualActionModal'
 import DossierDetail from '../components/DossierDetail'
 import type { Action } from '../types/Action'
-import { apiUrl } from '../api'
+import { apiUrl, apiFetch } from '../api'
 
 type MicrosoftActionResponse = {
   id?: string
@@ -207,7 +207,7 @@ const Dashboard = () => {
       setError(null)
 
       try {
-        const response = await fetch(apiUrl('/actions/'), {
+        const response = await apiFetch(apiUrl('/actions/'), {
           headers: {
             Accept: 'application/json',
           },
@@ -250,7 +250,7 @@ const Dashboard = () => {
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch(apiUrl('/actions/'), { headers: { Accept: 'application/json' } })
+      const response = await apiFetch(apiUrl('/actions/'), { headers: { Accept: 'application/json' } })
       if (!response.ok) throw new Error('Actions could not be loaded.')
       const payload: MicrosoftActionResponse[] = await response.json()
       setActions(payload.map(mapMicrosoftAction))
@@ -297,7 +297,7 @@ const Dashboard = () => {
     const results = await Promise.allSettled(
       selectedActions.map(async (action) => {
         const endpoint = action.source === 'Command Center' ? `/actions/manual/${action.id}` : `/actions/microsoft/${action.id}`
-        const response = await fetch(apiUrl(endpoint), { method: 'DELETE', headers: { Accept: 'application/json' } })
+        const response = await apiFetch(apiUrl(endpoint), { method: 'DELETE', headers: { Accept: 'application/json' } })
         if (!response.ok) {
           const text = await response.text()
           throw new Error(text || `Verwijderen van ${action.title} mislukt`)

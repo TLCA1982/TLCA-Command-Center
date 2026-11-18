@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { belgianToIso, isBelgianDate, isValidBelgianDate } from '../utils/date'
-import { apiUrl } from '../api'
+import { apiUrl, apiFetch } from '../api'
 import ContactPersonModal from './ContactPersonModal'
 import BelgianDateInput from './BelgianDateInput'
 
@@ -28,7 +28,7 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
   useEffect(() => {
     const loadCompanies = async () => {
       try {
-        const response = await fetch(apiUrl('/companies'), { headers: { Accept: 'application/json' } })
+        const response = await apiFetch(apiUrl('/companies'), { headers: { Accept: 'application/json' } })
         if (!response.ok) throw new Error('Bedrijven konden niet geladen worden')
         setCompanies(await response.json())
       } catch (err) {
@@ -49,7 +49,7 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
     const loadContacts = async () => {
       setLoadingContacts(true)
       try {
-        const response = await fetch(apiUrl(`/companies/${companyId}/contacts`), { headers: { Accept: 'application/json' } })
+        const response = await apiFetch(apiUrl(`/companies/${companyId}/contacts`), { headers: { Accept: 'application/json' } })
         if (!response.ok) throw new Error('Contactpersonen konden niet geladen worden')
         setContacts(await response.json())
       } catch (err) {
@@ -78,7 +78,7 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
     setCreatingCompany(true)
     setError(null)
     try {
-      const response = await fetch(apiUrl('/companies'), {
+      const response = await apiFetch(apiUrl('/companies'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ name }),
@@ -101,7 +101,7 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
   const refreshContacts = async (createdContact?: any) => {
     if (!companyId) return
     try {
-      const response = await fetch(apiUrl(`/companies/${companyId}/contacts`), { headers: { Accept: 'application/json' } })
+      const response = await apiFetch(apiUrl(`/companies/${companyId}/contacts`), { headers: { Accept: 'application/json' } })
       if (!response.ok) throw new Error('Contactpersonen konden niet geladen worden')
       const refreshedContacts = await response.json()
       setContacts(refreshedContacts)
@@ -135,7 +135,7 @@ const DossierModal = ({ onClose, onSaved }: Props) => {
     }
 
     try {
-      const response = await fetch(apiUrl('/dossiers'), {
+      const response = await apiFetch(apiUrl('/dossiers'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import type { Action } from '../types/Action'
 import { belgianToIso, isIsoDate, isBelgianDate, isValidBelgianDate, isoToBelgian } from '../utils/date'
-import { apiUrl } from '../api'
+import { apiUrl, apiFetch } from '../api'
 import BelgianDateInput from './BelgianDateInput'
 
 type Props = {
@@ -76,7 +76,7 @@ const ManualActionModal = ({ onClose, onSaved, initial }: Props) => {
       const isEdit = !!initial?.id
       if (isEdit && initial?.source && (initial.source === 'Microsoft To Do' || initial.source === 'Outlook gemarkeerde mail')) {
         // update Microsoft task via backend proxy endpoint
-        const resp = await fetch(apiUrl(`/actions/microsoft/${initial.id}`), {
+        const resp = await apiFetch(apiUrl(`/actions/microsoft/${initial.id}`), {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ dueDate: normalizedDue, status, notes, customer, contact, actionType }),
@@ -90,7 +90,7 @@ const ManualActionModal = ({ onClose, onSaved, initial }: Props) => {
       } else {
         const url = isEdit ? apiUrl(`/actions/manual/${initial?.id}`) : apiUrl('/actions/manual')
         const method = isEdit ? 'PUT' : 'POST'
-        const resp = await fetch(url, {
+        const resp = await apiFetch(url, {
           method,
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(payload),
@@ -119,7 +119,7 @@ const ManualActionModal = ({ onClose, onSaved, initial }: Props) => {
     try {
       const isMicrosoft = !!initial?.source && (initial.source === 'Microsoft To Do' || initial.source === 'Outlook gemarkeerde mail')
       const url = isMicrosoft ? apiUrl(`/actions/microsoft/${initial.id}`) : apiUrl(`/actions/manual/${initial.id}`)
-      const resp = await fetch(url, { method: 'DELETE', headers: { Accept: 'application/json' } })
+      const resp = await apiFetch(url, { method: 'DELETE', headers: { Accept: 'application/json' } })
       if (!resp.ok) {
         const txt = await resp.text()
         throw new Error(txt || 'Verwijderen mislukt')

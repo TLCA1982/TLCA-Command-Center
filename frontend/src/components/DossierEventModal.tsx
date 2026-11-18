@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { belgianToIso, isoToBelgian, isBelgianDate, isValidBelgianDate } from '../utils/date'
-import { apiUrl } from '../api'
+import { apiUrl, apiFetch } from '../api'
 import BelgianDateInput from './BelgianDateInput'
 
 type Props = {
@@ -38,7 +38,7 @@ const DossierEventModal = ({ dossierId, dossierCompanyId, currentStatus = 'Lopen
       return
     }
 
-    fetch(apiUrl(`/companies/${dossierCompanyId}/contacts`), { headers: { Accept: 'application/json' } })
+    apiFetch(apiUrl(`/companies/${dossierCompanyId}/contacts`), { headers: { Accept: 'application/json' } })
       .then(async (response) => {
         if (!response.ok) throw new Error('Contactpersonen konden niet geladen worden')
         const items = await response.json()
@@ -107,13 +107,13 @@ const DossierEventModal = ({ dossierId, dossierCompanyId, currentStatus = 'Lopen
     try {
       let resp: Response
       if (editing) {
-        resp = await fetch(apiUrl(`/dossiers/${dossierId}/events/${initialEvent.id}`), {
+        resp = await apiFetch(apiUrl(`/dossiers/${dossierId}/events/${initialEvent.id}`), {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(payload),
         })
       } else {
-        resp = await fetch(apiUrl(`/dossiers/${dossierId}/events`), {
+        resp = await apiFetch(apiUrl(`/dossiers/${dossierId}/events`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(payload),
@@ -143,7 +143,7 @@ const DossierEventModal = ({ dossierId, dossierCompanyId, currentStatus = 'Lopen
     setSaving(true)
     setError(null)
     try {
-      const resp = await fetch(apiUrl(`/dossiers/${dossierId}/events/${initialEvent.id}`), { method: 'DELETE', headers: { Accept: 'application/json' } })
+      const resp = await apiFetch(apiUrl(`/dossiers/${dossierId}/events/${initialEvent.id}`), { method: 'DELETE', headers: { Accept: 'application/json' } })
       if (!resp.ok) {
         const txt = await resp.text()
         throw new Error(txt || 'Verwijderen mislukt')

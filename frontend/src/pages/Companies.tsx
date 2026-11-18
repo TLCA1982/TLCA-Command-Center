@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import CompanyModal from '../components/CompanyModal'
 import ContactPersonModal from '../components/ContactPersonModal'
-import { apiUrl } from '../api'
+import { apiUrl, apiFetch } from '../api'
 
 const Companies = () => {
   const [companies, setCompanies] = useState<any[]>([])
@@ -16,7 +16,7 @@ const Companies = () => {
   const loadCompanies = async () => {
     setLoading(true)
     try {
-      const response = await fetch(apiUrl('/companies'), { headers: { Accept: 'application/json' } })
+      const response = await apiFetch(apiUrl('/companies'), { headers: { Accept: 'application/json' } })
       if (!response.ok) throw new Error('Bedrijven konden niet geladen worden')
       setCompanies(await response.json())
       setError(null)
@@ -29,7 +29,7 @@ const Companies = () => {
 
   const loadContacts = async (companyId: string) => {
     try {
-      const response = await fetch(apiUrl(`/companies/${companyId}/contacts`), { headers: { Accept: 'application/json' } })
+      const response = await apiFetch(apiUrl(`/companies/${companyId}/contacts`), { headers: { Accept: 'application/json' } })
       if (!response.ok) throw new Error('Contactpersonen konden niet geladen worden')
       setContacts(await response.json())
     } catch (err) {
@@ -49,7 +49,7 @@ const Companies = () => {
   const refreshCompany = async () => {
     await loadCompanies()
     if (!selectedCompany) return
-    const response = await fetch(apiUrl(`/companies/${selectedCompany.id}`), { headers: { Accept: 'application/json' } })
+    const response = await apiFetch(apiUrl(`/companies/${selectedCompany.id}`), { headers: { Accept: 'application/json' } })
     if (response.ok) setSelectedCompany(await response.json())
   }
 

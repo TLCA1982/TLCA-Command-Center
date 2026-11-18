@@ -1,6 +1,7 @@
 import ReactDOM from 'react-dom/client'
 import App from './App'
+import AuthGate from './AuthGate'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <App />,
+  <AuthGate><App /></AuthGate>,
 )

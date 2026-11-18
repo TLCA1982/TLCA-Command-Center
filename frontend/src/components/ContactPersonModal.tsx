@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { apiUrl } from '../api'
+import { apiUrl, apiFetch } from '../api'
 
 type Props = {
   companyId: string
@@ -46,7 +46,7 @@ const ContactPersonModal = ({ companyId, contact, allowOutlook = false, onClose,
     setSaving(true)
     setError(null)
     try {
-      const response = await fetch(apiUrl(contact ? `/companies/${companyId}/contacts/${contact.id}` : `/companies/${companyId}/contacts`), {
+      const response = await apiFetch(apiUrl(contact ? `/companies/${companyId}/contacts/${contact.id}` : `/companies/${companyId}/contacts`), {
         method: contact ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ ...fields, ...(allowOutlook && !contact ? { add_to_outlook: addToOutlook } : {}) }),

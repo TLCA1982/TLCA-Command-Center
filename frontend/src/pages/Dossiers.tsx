@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import DossierDetail from '../components/DossierDetail'
 import { isoToBelgian } from '../utils/date'
 import DossierModal from '../components/DossierModal'
-import { apiUrl } from '../api'
+import { apiUrl, apiFetch } from '../api'
 
 const Dossiers = () => {
   const [items, setItems] = useState<any[]>([])
@@ -52,7 +52,7 @@ const Dossiers = () => {
     const load = async () => {
       setLoading(true)
       try {
-        const resp = await fetch(apiUrl('/dossiers'), { headers: { Accept: 'application/json' } })
+        const resp = await apiFetch(apiUrl('/dossiers'), { headers: { Accept: 'application/json' } })
         if (!resp.ok) throw new Error('Dossiers konden niet geladen worden')
         const payload = await resp.json()
         if (!mounted) return
@@ -73,7 +73,7 @@ const Dossiers = () => {
     setLoading(true)
     setError(null)
     try {
-      const resp = await fetch(apiUrl('/dossiers'), { headers: { Accept: 'application/json' } })
+      const resp = await apiFetch(apiUrl('/dossiers'), { headers: { Accept: 'application/json' } })
       if (!resp.ok) throw new Error('Dossiers konden niet geladen worden')
       const payload = await resp.json()
       setItems(payload)

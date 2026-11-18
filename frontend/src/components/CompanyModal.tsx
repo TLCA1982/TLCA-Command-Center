@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { apiUrl } from '../api'
+import { apiUrl, apiFetch } from '../api'
 import ContactPersonModal from './ContactPersonModal'
 
 type Props = {
@@ -36,7 +36,7 @@ const CompanyModal = ({ company, onClose, onSaved }: Props) => {
     setError(null)
     try {
       const companyId = company?.id ?? savedCompanyId
-      const response = await fetch(apiUrl(companyId ? `/companies/${companyId}` : '/companies'), {
+      const response = await apiFetch(apiUrl(companyId ? `/companies/${companyId}` : '/companies'), {
         method: companyId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ ...fields, relationship_type: fields.relationship_type || null }),
@@ -48,7 +48,7 @@ const CompanyModal = ({ company, onClose, onSaved }: Props) => {
         // On retry, check whether the prior contact request already succeeded.
         let existingContact: any = null
         if (savedCompanyId) {
-          const contactsResponse = await fetch(apiUrl(`/companies/${savedCompany.id}/contacts`))
+          const contactsResponse = await apiFetch(apiUrl(`/companies/${savedCompany.id}/contacts`))
           if (!contactsResponse.ok) throw new Error('Bedrijf is opgeslagen. Controleren van de contactpersoon mislukt; probeer opnieuw.')
           const contacts = await contactsResponse.json()
           existingContact = contacts.find((item: any) => item.name.trim().toLowerCase() === (attemptedContactName || draftContact.name).trim().toLowerCase())
@@ -61,7 +61,7 @@ const CompanyModal = ({ company, onClose, onSaved }: Props) => {
         setAttemptedContactName(draftContact.name)
         {
           const contactPath = `/companies/${savedCompany.id}/contacts${existingContact ? `/${existingContact.id}` : ''}`
-          const contactResponse = await fetch(apiUrl(contactPath), {
+          const contactResponse = await apiFetch(apiUrl(contactPath), {
             method: existingContact ? 'PUT' : 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify(draftContact),

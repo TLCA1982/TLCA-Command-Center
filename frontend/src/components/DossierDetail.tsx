@@ -4,7 +4,7 @@ import DossierEventModal from './DossierEventModal'
 import CompanyModal from './CompanyModal'
 import ContactPersonModal from './ContactPersonModal'
 import BelgianDateInput from './BelgianDateInput'
-import { apiUrl } from '../api'
+import { apiUrl, apiFetch } from '../api'
 
 type Props = { id: string; onClose: () => void }
 
@@ -52,7 +52,7 @@ const DossierDetail = ({ id, onClose }: Props) => {
   const load = async () => {
     setLoading(true)
     try {
-      const response = await fetch(apiUrl(`/dossiers/${id}`), { headers: { Accept: 'application/json' } })
+      const response = await apiFetch(apiUrl(`/dossiers/${id}`), { headers: { Accept: 'application/json' } })
       if (!response.ok) throw new Error('Dossier kon niet geladen worden')
       setData(await response.json())
       setError(null)
@@ -66,7 +66,7 @@ const DossierDetail = ({ id, onClose }: Props) => {
   useEffect(() => { load() }, [id])
 
   useEffect(() => {
-    fetch(apiUrl('/companies'), { headers: { Accept: 'application/json' } })
+    apiFetch(apiUrl('/companies'), { headers: { Accept: 'application/json' } })
       .then(async (response) => { if (!response.ok) throw new Error('Bedrijven konden niet geladen worden'); setCompanies(await response.json()) })
       .catch((err) => setError(err instanceof Error ? err.message : 'Bedrijven konden niet geladen worden'))
   }, [])
@@ -90,7 +90,7 @@ const DossierDetail = ({ id, onClose }: Props) => {
     }
 
     setCompanyId(activeCompanyId)
-    fetch(apiUrl(`/companies/${activeCompanyId}/contacts`), { headers: { Accept: 'application/json' } })
+    apiFetch(apiUrl(`/companies/${activeCompanyId}/contacts`), { headers: { Accept: 'application/json' } })
       .then(async (response) => { if (!response.ok) throw new Error('Contactpersonen konden niet geladen worden'); setContacts(await response.json()) })
       .catch((err) => setError(err instanceof Error ? err.message : 'Contactpersonen konden niet geladen worden'))
   }, [data?.company_id])
@@ -111,7 +111,7 @@ const DossierDetail = ({ id, onClose }: Props) => {
     setSaving(true)
     setError(null)
     try {
-      const response = await fetch(apiUrl(`/dossiers/${id}`), {
+      const response = await apiFetch(apiUrl(`/dossiers/${id}`), {
         method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ company_id: companyId, ...(primaryContactId ? { primary_contact_person_id: primaryContactId } : {}), subject: subject.trim(), status, follow_up_date: followUp ? belgianToIso(followUp) : '' }),
       })
@@ -126,7 +126,7 @@ const DossierDetail = ({ id, onClose }: Props) => {
   const deleteContact = async (contact: any) => {
     if (!window.confirm(`Contactpersoon ${contact.name} verwijderen?`)) return
     try {
-      const response = await fetch(apiUrl(`/companies/${companyId}/contacts/${contact.id}`), { method: 'DELETE', headers: { Accept: 'application/json' } })
+      const response = await apiFetch(apiUrl(`/companies/${companyId}/contacts/${contact.id}`), { method: 'DELETE', headers: { Accept: 'application/json' } })
       if (!response.ok) throw new Error(await apiErrorMessage(response, 'Contactpersoon verwijderen mislukt'))
       setContacts((current) => current.filter((item) => item.id !== contact.id))
       await load()
@@ -138,7 +138,7 @@ const DossierDetail = ({ id, onClose }: Props) => {
     setSaving(true)
     setError(null)
     try {
-      const response = await fetch(apiUrl(`/dossiers/${id}`), { method: 'DELETE', headers: { Accept: 'application/json' } })
+      const response = await apiFetch(apiUrl(`/dossiers/${id}`), { method: 'DELETE', headers: { Accept: 'application/json' } })
       if (!response.ok) throw new Error((await response.text()) || 'Verwijderen mislukt')
       window.dispatchEvent(new CustomEvent('dossiers:changed'))
       onClose()
@@ -176,7 +176,7 @@ const DossierDetail = ({ id, onClose }: Props) => {
     </>}
     <div className="modal-actions">{!editing ? <><button type="button" onClick={removeDossier} disabled={saving} className="danger-btn">Verwijderen</button><button type="button" onClick={() => setEditing(true)}>Bewerken</button><button type="button" onClick={onClose}>Sluiten</button></> : <><button type="button" onClick={() => { setEditing(false); setCompanyId(data.company_id ?? ''); setCompanyName(data.company?.name ?? data.customer ?? ''); setPrimaryContactId(data.primary_contact_person_id ?? ''); setSubject(data.subject ?? ''); setStatus(data.status ?? 'Lopend'); setFollowUp(data.follow_up_date ? isoToBelgian(data.follow_up_date) : '') }} disabled={saving}>Annuleren</button><button type="button" onClick={save} disabled={saving} className="action-btn action-btn--primary">Dossier opslaan</button></>}</div>
     {showCompanyModal && data?.company && <CompanyModal company={data.company} onClose={() => setShowCompanyModal(false)} onSaved={load} />}
-    {contactBeingEdited !== undefined && companyId && <ContactPersonModal allowOutlook companyId={companyId} contact={contactBeingEdited || undefined} onClose={() => setContactBeingEdited(undefined)} onSaved={async () => { setContactBeingEdited(undefined); const response = await fetch(apiUrl(`/companies/${companyId}/contacts`)); setContacts(await response.json()); await load() }} />}
+    {contactBeingEdited !== undefined && companyId && <ContactPersonModal allowOutlook companyId={companyId} contact={contactBeingEdited || undefined} onClose={() => setContactBeingEdited(undefined)} onSaved={async () => { setContactBeingEdited(undefined); const response = await apiFetch(apiUrl(`/companies/${companyId}/contacts`)); setContacts(await response.json()); await load() }} />}
     {showEventModal && <DossierEventModal dossierId={id} dossierCompanyId={data?.company_id ?? ''} currentStatus={data?.status} initialEvent={selectedEvent ?? undefined} onClose={() => { setShowEventModal(false); setSelectedEvent(null) }} onSaved={load} />}
   </div></div>
 }
